@@ -209,11 +209,11 @@ describe('TopologyView', () => {
       expect(engines).toEqual(['force', 'elk-layered'])
     })
 
-    it('starts the comparison with the toolbar (ELK layered, or force if the engine is ELK) and stops it', async () => {
+    it('starts the comparison with the toolbar (the own stress layout) and stops it', async () => {
       const wrapper = await mountView('/nw/ss')
       await wrapper.get('[data-testid=compare]').setValue(true)
       await flushPromises()
-      expect(router.currentRoute.value.query.compare).toBe('elk-layered')
+      expect(router.currentRoute.value.query.compare).toBe('stress')
       expect(svgCount(wrapper)).toBe(2)
       await wrapper.get('[data-testid=compare]').setValue(false)
       await flushPromises()
@@ -221,11 +221,18 @@ describe('TopologyView', () => {
       expect(svgCount(wrapper)).toBe(1)
     })
 
-    it('compares with force when the engine of the view is ELK', async () => {
+    it('compares the own stress layout with ELK stress (the same kind of algorithms)', async () => {
+      const wrapper = await mountView('/nw/ss?layout=stress')
+      await wrapper.get('[data-testid=compare]').setValue(true)
+      await flushPromises()
+      expect(router.currentRoute.value.query.compare).toBe('elk-stress')
+    })
+
+    it('compares the engines other than the own stress layout with it', async () => {
       const wrapper = await mountView('/nw/ss?layout=elk-force')
       await wrapper.get('[data-testid=compare]').setValue(true)
       await flushPromises()
-      expect(router.currentRoute.value.query.compare).toBe('force')
+      expect(router.currentRoute.value.query.compare).toBe('stress')
     })
 
     it('puts the changed engine into the URL (the default engine is not put)', async () => {

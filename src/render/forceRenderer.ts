@@ -16,13 +16,14 @@ import type { DisplayGraph, DisplayLink, DisplayNode } from '../domain/graph'
 import { countCrossings, overlapDepth, type Segment } from '../domain/layoutScore'
 import { radiusForPorts, spreadAngles } from '../domain/ports'
 import { layoutWithElk } from './layout/elkLayout'
+import { layoutWithStress } from './layout/stress'
 import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
 import {
   DEFAULT_LAYOUT_ENGINE,
   elkAlgorithmOf,
-  type ElkAlgorithm,
   type ElkLayoutFn,
+  type LayerLayoutFn,
   type LayoutEngine,
   type LayoutStats,
   type Position,
@@ -102,6 +103,8 @@ export interface RendererOptions {
   engine?: LayoutEngine
   /** Function to arrange with ELK (default: ELK is loaded when it is used) */
   elkLayout?: ElkLayoutFn
+  /** Function to arrange with the own stress layout (default: layoutWithStress) */
+  stressLayout?: LayerLayoutFn
   /** Called with null when a layout is started (ELK is asynchronous) and with the result when it is done */
   onLayout?: (stats: LayoutStats | null) => void
 }
@@ -136,6 +139,7 @@ export class ForceRenderer {
   private readonly multiStart: number
   private engine: LayoutEngine
   private readonly elkLayout: ElkLayoutFn
+  private readonly stressLayout: LayerLayoutFn
   private readonly onLayout: (stats: LayoutStats | null) => void
   private graph: DisplayGraph = { nodes: [], links: [] }
   /** To ignore the result of an old (asynchronous) layout */
@@ -175,6 +179,8 @@ export class ForceRenderer {
     this.multiStart = options.multiStart ?? DEFAULT_MULTISTART
     this.engine = options.engine ?? DEFAULT_LAYOUT_ENGINE
     this.elkLayout = options.elkLayout ?? layoutWithElk
+    this.stressLayout =
+      options.stressLayout ?? ((nodes, links) => Promise.resolve(layoutWithStress(nodes, links)))
     this.onLayout = options.onLayout ?? (() => undefined)
     const svgSelection = select(svg)
     this.root = svgSelection.append('g').attr('class', 'viewport')
@@ -373,14 +379,15 @@ export class ForceRenderer {
     const started = performance.now()
     this.layoutStarted = started
     this.routes = new Map()
-    const algorithm = elkAlgorithmOf(this.engine)
-    if (!algorithm) {
+    const layerLayout = this.layerLayoutOf(this.engine)
+    if (!layerLayout) {
       this.layout()
       this.reportLayout(started)
       return
     }
 
-    // ELK arranges asynchronously. The nodes are shown at the known positions (or near their areas) until then.
+    // The other engines arrange the layers (ELK asynchronously). The nodes are shown at the known positions
+    // (or near their areas) until then.
     this.simulation.stop()
     const fresh = this.bodies.filter((body) => !this.positions.has(body.id))
     for (const body of this.bodies) {
@@ -395,7 +402,14 @@ export class ForceRenderer {
       return
     }
     this.onLayout(null)
-    void this.layoutElk(algorithm, token, started, signature)
+    void this.layoutByEngine(layerLayout, token, started, signature)
+  }
+
+  /** Function to arrange the nodes of a layer by the engine (undefined for force: it is made by the simulation) */
+  private layerLayoutOf(engine: LayoutEngine): LayerLayoutFn | undefined {
+    const algorithm = elkAlgorithmOf(engine)
+    if (algorithm) return (nodes, links) => this.elkLayout(algorithm, nodes, links)
+    return engine === 'stress' ? this.stressLayout : undefined
   }
 
   private layoutSignature(): string {
@@ -406,9 +420,9 @@ export class ForceRenderer {
     return `${this.engine}|${nodes}|${links.join(',')}`
   }
 
-  /** Arrange the nodes of each layer with ELK and put the layouts of the layers in a grid */
-  private async layoutElk(
-    algorithm: ElkAlgorithm,
+  /** Arrange the nodes of each layer by the engine and put the layouts of the layers in a grid */
+  private async layoutByEngine(
+    layerLayout: LayerLayoutFn,
     token: number,
     started: number,
     signature: string,
@@ -425,8 +439,7 @@ export class ForceRenderer {
           const [source, target] = [this.itemOf(link.source)?.id, this.itemOf(link.target)?.id]
           return source && target && ids.has(source) && ids.has(target) ? [{ source, target }] : []
         })
-        const { positions, routes } = await this.elkLayout(
-          algorithm,
+        const { positions, routes } = await layerLayout(
           items.map((item) => ({ id: item.id, radius: item.radius })),
           links,
         )

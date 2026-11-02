@@ -1,8 +1,9 @@
 /** Layout engines to compare */
-export type LayoutEngine = 'force' | 'elk-layered' | 'elk-stress' | 'elk-force'
+export type LayoutEngine = 'force' | 'stress' | 'elk-layered' | 'elk-stress' | 'elk-force'
 
 export const LAYOUT_ENGINES: ReadonlyArray<{ id: LayoutEngine; label: string }> = [
   { id: 'force', label: 'force (d3-force)' },
+  { id: 'stress', label: 'stress (own)' },
   { id: 'elk-layered', label: 'ELK layered' },
   { id: 'elk-stress', label: 'ELK stress' },
   { id: 'elk-force', label: 'ELK force' },
@@ -57,6 +58,12 @@ export interface ElkLayoutResult {
    * Links drawn straight are not in it. */
   routes: Map<number, Position[]>
 }
+
+/** Function to arrange the nodes of a layer (the engines other than force) */
+export type LayerLayoutFn = (
+  nodes: readonly LayoutNode[],
+  links: readonly LayoutLink[],
+) => Promise<ElkLayoutResult>
 
 /** Function to arrange the nodes of a layer with ELK */
 export type ElkLayoutFn = (

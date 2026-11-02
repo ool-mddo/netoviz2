@@ -168,6 +168,7 @@ describe('ForceView', () => {
       expect((select.element as HTMLSelectElement).value).toBe('force')
       expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual([
         'force',
+        'stress',
         'elk-layered',
         'elk-stress',
         'elk-force',

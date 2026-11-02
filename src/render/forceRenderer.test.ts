@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { DisplayGraph } from '../domain/graph'
 import { ForceRenderer, type Highlight } from './forceRenderer'
-import type { ElkLayoutFn, LayoutStats, Positions } from './layout/types'
+import type { ElkLayoutFn, LayerLayoutFn, LayoutStats, Positions } from './layout/types'
 
 /** nodes a, b, r; term-points of a (p1, p2) and b (p1); a/p1 - b/p1 are linked */
 const graph: DisplayGraph = {
@@ -504,6 +504,57 @@ describe('ForceRenderer', () => {
       )
       await flush()
       expect(reports.at(-1)).toMatchObject({ crossings: 0 })
+    })
+
+    it('arranges with the own stress layout when the engine is stress (ELK is not used)', async () => {
+      const elk = lineLayout()
+      const stress = vi.fn<LayerLayoutFn>((nodes) =>
+        Promise.resolve({
+          positions: new Map(nodes.map((n, i) => [n.id, { x: i * 200 + 50, y: 50 }])) as Positions,
+          routes: new Map(),
+        }),
+      )
+      const reports: Array<LayoutStats | null> = []
+      renderer.destroy()
+      renderer = new ForceRenderer(svg, callbacks, {
+        multiStart: 1,
+        engine: 'stress',
+        elkLayout: elk,
+        stressLayout: stress,
+        onLayout: (s) => reports.push(s),
+      })
+      renderer.setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      expect(elk).not.toHaveBeenCalled()
+      expect(stress).toHaveBeenCalledTimes(2) // one for each layer
+      expect(stress.mock.calls[0]?.[0].map((n) => n.id)).toEqual(['l1/a', 'l1/b'])
+      expect(pos('l1/b')[0] - pos('l1/a')[0]).toBeCloseTo(200, 3)
+      expect(reports.at(-1)).toMatchObject({ engine: 'stress', nodes: 3 })
+    })
+
+    it('arranges with the real own stress layout by default (no node overlaps)', async () => {
+      renderer.destroy()
+      const reports: Array<LayoutStats | null> = []
+      renderer = new ForceRenderer(svg, callbacks, { engine: 'stress', onLayout: (s) => reports.push(s) })
+      renderer.setGraph(graph, ['l1', 'l2'])
+      await flush()
+      expect(reports.at(-1)).toMatchObject({ engine: 'stress', crossings: 0, overlap: 0 })
+    })
+
+    it('can be changed between force, stress and ELK', async () => {
+      const reports: Array<LayoutStats | null> = []
+      renderer.destroy()
+      renderer = new ForceRenderer(svg, callbacks, {
+        multiStart: 1,
+        elkLayout: lineLayout(),
+        onLayout: (s) => reports.push(s),
+      })
+      renderer.setGraph(collapsed, ['l1', 'l2'])
+      for (const engine of ['stress', 'elk-stress', 'force'] as const) {
+        renderer.setEngine(engine)
+        await flush()
+        expect(reports.at(-1)).toMatchObject({ engine, nodes: 3 })
+      }
     })
 
     it('puts the term-points on the circles of the nodes with ELK, too', async () => {

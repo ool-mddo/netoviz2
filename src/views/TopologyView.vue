@@ -95,9 +95,13 @@ function setEngineQuery(key: 'layout' | 'compare', engine: LayoutEngine | null):
   else query[key] = engine
   void router.replace({ query })
 }
-/** Compare with another engine: ELK layered (if the engine of the view is ELK, force) */
+/**
+ * Compare with another engine: the own stress layout and ELK stress (the same kind of algorithms) are compared with
+ * each other, and the other engines with the own stress layout
+ */
 function setCompare(on: boolean): void {
-  setEngineQuery('compare', on ? (engineA.value === 'force' ? 'elk-layered' : 'force') : null)
+  const other: LayoutEngine = engineA.value === 'stress' ? 'elk-stress' : 'stress'
+  setEngineQuery('compare', on ? other : null)
 }
 
 function toggleLayer(layerId: string): void {
