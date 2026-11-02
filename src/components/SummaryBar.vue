@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import type { Summary } from '../api/types'
 
 const props = defineProps<{ summary: Summary }>()
@@ -11,7 +12,10 @@ const infoCount = computed(() => props.summary.warnings.filter((w) => w.severity
 
 <template>
   <div class="summary-bar">
-    <strong>{{ summary.network }}</strong> / {{ summary.snapshot }}
+    <RouterLink :to="{ name: 'network', params: { network: summary.network } }" class="network-link">
+      <strong>{{ summary.network }}</strong>
+    </RouterLink>
+    / {{ summary.snapshot }}
     <span v-for="flag in summary.flags" :key="flag" class="chip" data-testid="flag">{{ flag }}</span>
     <span v-if="summary.has_diff" class="chip diff" data-testid="has-diff">diff</span>
     <button
@@ -37,6 +41,9 @@ const infoCount = computed(() => props.summary.warnings.filter((w) => w.severity
 </template>
 
 <style scoped>
+.network-link {
+  color: inherit;
+}
 .summary-bar {
   display: flex;
   flex-wrap: wrap;

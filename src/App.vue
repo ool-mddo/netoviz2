@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterView } from 'vue-router'
+import AppBreadcrumb from './components/AppBreadcrumb.vue'
 </script>
 
 <template>
   <header class="app-header">
-    <RouterLink to="/" class="app-title">netoviz2</RouterLink>
+    <AppBreadcrumb />
   </header>
   <main class="app-main">
     <RouterView />
@@ -25,11 +26,6 @@ body {
   gap: 1rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid #8884;
-}
-.app-title {
-  font-weight: bold;
-  text-decoration: none;
-  color: inherit;
 }
 .app-main {
   padding: 1rem;

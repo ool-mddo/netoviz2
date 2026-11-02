@@ -1,58 +1,36 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { getIndex } from '../api/client'
-import type { IndexEntry } from '../api/types'
+import { useIndexStore } from '../stores/index'
 
-const entries = ref<IndexEntry[]>([])
-const error = ref<string | null>(null)
-const loading = ref(true)
-
-const networks = computed(() => {
-  const map = new Map<string, IndexEntry[]>()
-  for (const entry of entries.value) {
-    const list = map.get(entry.network)
-    if (list) list.push(entry)
-    else map.set(entry.network, [entry])
-  }
-  return [...map.entries()]
-})
-
-onMounted(async () => {
-  try {
-    entries.value = await getIndex()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
-})
+const index = useIndexStore()
+onMounted(() => void index.load(true))
 </script>
 
 <template>
-  <h1>Topologies</h1>
-  <p v-if="loading">Loading...</p>
-  <p v-else-if="error" class="error">Failed to load the list: {{ error }}</p>
-  <p v-else-if="entries.length === 0">No topology is registered.</p>
-  <section v-for="[network, items] in networks" :key="network">
-    <h2>{{ network }}</h2>
-    <ul>
-      <li v-for="item in items" :key="item.snapshot">
-        <RouterLink :to="{ name: 'topology', params: { network: item.network, snapshot: item.snapshot } }">
-          {{ item.snapshot }}
-        </RouterLink>
-        <span class="label"> {{ item.label }}</span>
-      </li>
-    </ul>
-  </section>
+  <h1>Networks</h1>
+  <p v-if="index.loading && !index.loaded">Loading...</p>
+  <p v-else-if="index.error" class="error">Failed to load the list: {{ index.error }}</p>
+  <p v-else-if="index.networks.length === 0">No topology is registered.</p>
+  <ul class="networks">
+    <li v-for="item in index.networks" :key="item.network">
+      <RouterLink :to="{ name: 'network', params: { network: item.network } }" data-testid="network-link">
+        {{ item.network }}
+      </RouterLink>
+      <span class="count"> {{ item.snapshots.length }} snapshots</span>
+    </li>
+  </ul>
 </template>
 
 <style scoped>
 .error {
   color: #c62828;
 }
-.label {
+.count {
   opacity: 0.6;
   font-size: 0.85em;
+}
+.networks {
+  line-height: 1.8;
 }
 </style>

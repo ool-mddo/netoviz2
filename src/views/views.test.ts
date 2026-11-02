@@ -6,6 +6,7 @@ import { router } from '../router'
 import { useSelectionStore } from '../stores/selection'
 import { attributesData, layer1Data, layer2Data, makeSummary, supportsData } from '../test/fixtures'
 import HomeView from './HomeView.vue'
+import NetworkView from './NetworkView.vue'
 import TopologyView from './TopologyView.vue'
 
 vi.mock('../api/client')
@@ -31,23 +32,25 @@ beforeEach(() => {
   )
 })
 
+const indexEntries = [
+  { label: 'A (s1)', network: 'a', snapshot: 's1', file: 'topology.json' },
+  { label: 'A (s2)', network: 'a', snapshot: 's2', file: 'topology.json' },
+  { label: 'B (s1)', network: 'b', snapshot: 's1', file: 'topology.json' },
+]
+
 describe('HomeView', () => {
-  it('lists snapshots grouped by network with links', async () => {
-    mocked.getIndex.mockResolvedValue([
-      { label: 'A (s1)', network: 'a', snapshot: 's1', file: 'topology.json' },
-      { label: 'A (s2)', network: 'a', snapshot: 's2', file: 'topology.json' },
-      { label: 'B (s1)', network: 'b', snapshot: 's1', file: 'topology.json' },
-    ])
+  it('lists networks with the number of snapshots and links to the snapshot list', async () => {
+    mocked.getIndex.mockResolvedValue(indexEntries)
     const wrapper = mount(HomeView, { global: { plugins: [createPinia(), router] } })
     await flushPromises()
-    expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['a', 'b'])
-    const href = (network: string, snapshot: string) =>
-      router.resolve({ name: 'topology', params: { network, snapshot } }).href
-    expect(wrapper.findAll('a').map((a) => a.attributes('href'))).toEqual([
-      href('a', 's1'),
-      href('a', 's2'),
-      href('b', 's1'),
+    const links = wrapper.findAll('[data-testid=network-link]')
+    expect(links.map((a) => a.text())).toEqual(['a', 'b'])
+    expect(links.map((a) => a.attributes('href'))).toEqual([
+      router.resolve({ name: 'network', params: { network: 'a' } }).href,
+      router.resolve({ name: 'network', params: { network: 'b' } }).href,
     ])
+    expect(wrapper.text()).toContain('2 snapshots')
+    expect(wrapper.text()).toContain('1 snapshots')
   })
 
   it('shows the error message if the list can not be loaded', async () => {
@@ -55,6 +58,33 @@ describe('HomeView', () => {
     const wrapper = mount(HomeView, { global: { plugins: [createPinia(), router] } })
     await flushPromises()
     expect(wrapper.text()).toContain('Bad Gateway')
+  })
+})
+
+describe('NetworkView', () => {
+  it('lists the snapshots of the network with links to the viewer', async () => {
+    mocked.getIndex.mockResolvedValue(indexEntries)
+    const wrapper = mount(NetworkView, {
+      props: { network: 'a' },
+      global: { plugins: [createPinia(), router] },
+    })
+    await flushPromises()
+    const links = wrapper.findAll('[data-testid=snapshot-link]')
+    expect(links.map((a) => a.text())).toEqual(['s1', 's2'])
+    expect(links[0]?.attributes('href')).toBe(
+      router.resolve({ name: 'topology', params: { network: 'a', snapshot: 's1' } }).href,
+    )
+    expect(wrapper.text()).toContain('A (s2)')
+  })
+
+  it('tells that there is no snapshot for an unknown network', async () => {
+    mocked.getIndex.mockResolvedValue(indexEntries)
+    const wrapper = mount(NetworkView, {
+      props: { network: 'zzz' },
+      global: { plugins: [createPinia(), router] },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No snapshot')
   })
 })
 
