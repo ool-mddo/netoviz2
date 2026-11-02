@@ -24,6 +24,17 @@ npm run build        # dist/ (静的ファイル。/netoviz2/ 配下で配信す
 - `/netoviz2/` : network / snapshot 一覧
 - `/netoviz2/:network/:snapshot` : トポロジの表示
 
+## コンテナ
+
+`Dockerfile` は、ビルドした静的ファイルを nginx で `/netoviz2/` 配下に配信するイメージを作る (ランタイムの Node は含まない。volume も持たない)。
+playground の `docker-compose.yaml` の `netoviz2` サービスとして起動し、api-proxy (nginx) の `/netoviz2/` から転送される。
+
+```bash
+# playground のディレクトリで
+docker compose up -d --build netoviz2 api-proxy
+# http://localhost:15000/netoviz2/
+```
+
 ## 構成
 
 ```
