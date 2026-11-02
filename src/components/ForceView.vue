@@ -19,17 +19,26 @@ let renderer: ForceRenderer | null = null
 /** Stable order of all layers (colors do not change by showing/hiding layers) */
 const layerOrder = computed(() => layersTopDown(topology.summary?.layers ?? []).map((layer) => layer.id))
 
-const graph = computed(() => {
-  const layers = props.visibleLayers.flatMap((id) => {
+const visibleData = computed(() =>
+  props.visibleLayers.flatMap((id) => {
     const data = topology.layerData[id]
     return data ? [data] : []
-  })
-  return buildDisplayGraph(layers, view.expandedNodes)
-})
+  }),
+)
+const tpCount = computed(() => visibleData.value.reduce((sum, data) => sum + data.tps.length, 0))
+/** Nodes whose term-points are shown */
+const expanded = computed(() =>
+  view.expandedNodes(
+    visibleData.value.flatMap((data) => data.nodes.map((node) => node.id)),
+    tpCount.value,
+  ),
+)
+const portsOn = computed(() => view.portsByDefault(tpCount.value))
+const graph = computed(() => buildDisplayGraph(visibleData.value, expanded.value))
 const shownIds = computed(() => new Set(graph.value.nodes.map((node) => node.id)))
 
 const highlight = computed<Highlight>(() => {
-  const toShown = (id: string) => displayIdOf(topology.objects.get(id), view.expandedNodes, shownIds.value)
+  const toShown = (id: string) => displayIdOf(topology.objects.get(id), expanded.value, shownIds.value)
   const selectedId = selection.selectedId ? (toShown(selection.selectedId) ?? null) : null
   const tracedIds = new Set<string>()
   for (const id of selection.trace.ids) {
@@ -73,14 +82,22 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
   <div class="force-view">
     <div class="toolbar">
       <button type="button" data-testid="fit" @click="renderer?.fit()">Fit</button>
-      <button type="button" data-testid="collapse-all" @click="view.collapseAll()">Collapse all</button>
+      <label>
+        <input
+          type="checkbox"
+          :checked="portsOn"
+          data-testid="show-ports"
+          @change="view.setShowPorts(($event.target as HTMLInputElement).checked)"
+        />
+        Term-points
+      </label>
       <label>
         Trace
         <select v-model="selection.traceMode" data-testid="trace-mode">
           <option v-for="mode in traceModes" :key="mode" :value="mode">{{ mode }}</option>
         </select>
       </label>
-      <span class="hint">click: select / double click: show term-points</span>
+      <span class="hint">click: select / double click: show or hide the term-points of the node</span>
     </div>
     <svg ref="svgEl" class="force-svg" data-testid="force-svg" />
   </div>
@@ -119,8 +136,18 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
   cursor: pointer;
 }
 .force-svg .node circle {
+  fill: var(--layer-color);
   stroke: #fff;
   stroke-width: 1.5;
+}
+.force-svg .node.tp circle {
+  fill: #fff;
+  stroke: var(--layer-color);
+  stroke-width: 2;
+}
+/* names of term-points are shown when zoomed in, or when the term-point is selected/traced */
+.force-svg:not(.zoomed-in) .node.tp:not(.selected):not(.traced) text {
+  display: none;
 }
 .force-svg .node.expanded circle {
   stroke-dasharray: 3 2;
@@ -131,7 +158,7 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
   pointer-events: none;
 }
 .force-svg .node.tp text {
-  font-size: 8px;
+  font-size: 7px;
 }
 .force-svg .node.diff-added circle {
   stroke: #2e7d32;

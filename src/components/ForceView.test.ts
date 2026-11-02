@@ -46,34 +46,40 @@ afterEach(() => {
 })
 
 describe('ForceView', () => {
-  it('draws the nodes of the visible layers', async () => {
+  const count = (wrapper: ReturnType<typeof mount>, selector: string) =>
+    wrapper.element.querySelectorAll(selector).length
+
+  it('draws the nodes and the term-points of the visible layers', async () => {
     const { wrapper } = await mountView()
     current = wrapper
-    expect(wrapper.element.querySelectorAll('g.node')).toHaveLength(3)
+    expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
+    expect(count(wrapper, 'g.node.tp')).toBe(4)
   })
 
   it('draws only the visible layers', async () => {
     const { wrapper } = await mountView(['layer2'])
     current = wrapper
-    expect(wrapper.element.querySelectorAll('g.node')).toHaveLength(1)
+    expect(count(wrapper, 'g.node')).toBe(2)
   })
 
   it('updates the drawing when a layer is shown', async () => {
     const { wrapper } = await mountView(['layer2'], ['layer1', 'layer2'])
     current = wrapper
     await wrapper.setProps({ visibleLayers: ['layer1', 'layer2'] })
-    expect(wrapper.element.querySelectorAll('g.node')).toHaveLength(3)
+    expect(count(wrapper, 'g.node')).toBe(7)
   })
 
-  it('highlights the selected node and the nodes traced by supports', async () => {
+  it('highlights the selected node and the objects traced by supports', async () => {
     const { wrapper, selection } = await mountView()
     current = wrapper
     selection.select('layer2/r1')
     await flushPromises()
     expect(nodeEl(wrapper, 'layer2/r1').classList.contains('selected')).toBe(true)
     expect(nodeEl(wrapper, 'layer1/sw1').classList.contains('traced')).toBe(true)
+    expect(nodeEl(wrapper, 'layer1/sw1/p1').classList.contains('traced')).toBe(true)
     expect(nodeEl(wrapper, 'layer1/sw2').classList.contains('dim')).toBe(true)
-    expect(wrapper.element.querySelectorAll('line.trace-edge')).toHaveLength(1)
+    // the support of the node and the support of its term-point
+    expect(count(wrapper, 'line.trace-edge')).toBe(2)
   })
 
   it('does not trace when the trace mode is off', async () => {
@@ -82,23 +88,40 @@ describe('ForceView', () => {
     selection.select('layer2/r1')
     await wrapper.get('[data-testid=trace-mode]').setValue('off')
     expect(selection.traceMode).toBe('off')
-    expect(wrapper.element.querySelectorAll('g.node.traced, g.node.dim')).toHaveLength(0)
+    expect(count(wrapper, 'g.node.traced, g.node.dim')).toBe(0)
   })
 
-  it('shows the term-points of an expanded node and maps a selected term-point to them', async () => {
-    const { wrapper, selection, view } = await mountView()
+  it('highlights the selected term-point itself, and shows it as its node when term-points are hidden', async () => {
+    const { wrapper, selection } = await mountView()
     current = wrapper
     selection.select('layer1/sw1/p1')
     await flushPromises()
-    // the term-point is shown as its node while the node is collapsed
-    expect(nodeEl(wrapper, 'layer1/sw1').classList.contains('selected')).toBe(true)
-    view.toggleExpand('layer1/sw1')
-    await flushPromises()
-    expect(wrapper.element.querySelectorAll('g.node')).toHaveLength(5)
     expect(nodeEl(wrapper, 'layer1/sw1/p1').classList.contains('selected')).toBe(true)
-    view.collapseAll()
+    await wrapper.get('[data-testid=show-ports]').setValue(false)
+    expect(count(wrapper, 'g.node.tp')).toBe(0)
+    expect(nodeEl(wrapper, 'layer1/sw1').classList.contains('selected')).toBe(true)
+  })
+
+  it('shows or hides the term-points of all nodes with the checkbox', async () => {
+    const { wrapper } = await mountView()
+    current = wrapper
+    const box = wrapper.get('[data-testid=show-ports]')
+    expect((box.element as HTMLInputElement).checked).toBe(true)
+    await box.setValue(false)
+    expect(count(wrapper, 'g.node')).toBe(3)
+    await box.setValue(true)
+    expect(count(wrapper, 'g.node')).toBe(7)
+  })
+
+  it('hides the term-points of one node by double click (and shows them again)', async () => {
+    const { wrapper } = await mountView()
+    current = wrapper
+    nodeEl(wrapper, 'layer1/sw1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
     await flushPromises()
-    expect(wrapper.element.querySelectorAll('g.node')).toHaveLength(3)
+    expect(count(wrapper, 'g.node.tp')).toBe(2) // sw1 has 2 of the 4
+    nodeEl(wrapper, 'layer1/sw1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    await flushPromises()
+    expect(count(wrapper, 'g.node.tp')).toBe(4)
   })
 
   it('selects by click and loads the attributes of the object', async () => {
@@ -110,6 +133,15 @@ describe('ForceView', () => {
     expect(mocked.getAttributes).toHaveBeenCalledWith('nw', 'ss', ['layer2/r1'])
   })
 
+  it('selects a term-point by click and loads its attributes', async () => {
+    const { wrapper, selection } = await mountView()
+    current = wrapper
+    nodeEl(wrapper, 'layer1/sw1/p2').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(selection.selectedId).toBe('layer1/sw1/p2')
+    expect(mocked.getAttributes).toHaveBeenCalledWith('nw', 'ss', ['layer1/sw1/p2'])
+  })
+
   it('clears the selection by a click on the background', async () => {
     const { wrapper, selection } = await mountView()
     current = wrapper
@@ -119,14 +151,6 @@ describe('ForceView', () => {
     expect(selection.selectedId).toBeNull()
   })
 
-  it('expands a node by double click', async () => {
-    const { wrapper, view } = await mountView()
-    current = wrapper
-    nodeEl(wrapper, 'layer1/sw1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
-    await flushPromises()
-    expect(view.expandedNodes.has('layer1/sw1')).toBe(true)
-  })
-
   it('loads the layers of the objects reached through supports when an object is selected', async () => {
     const { wrapper, topology } = await mountView(['layer2'], ['layer2'])
     current = wrapper
@@ -134,6 +158,6 @@ describe('ForceView', () => {
     await flushPromises()
     expect(topology.layerData['layer1']).toBeDefined()
     // the layer is loaded only for names: it is not drawn (not visible)
-    expect(wrapper.element.querySelectorAll('g.node')).toHaveLength(1)
+    expect(wrapper.element.querySelectorAll('g.node:not(.tp)')).toHaveLength(1)
   })
 })
