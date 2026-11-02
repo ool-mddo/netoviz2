@@ -2,11 +2,13 @@
 import { computed } from 'vue'
 import type { LayerInfo } from '../api/types'
 import { layersTopDown } from '../domain/layers'
+import { layerColor } from '../render/forceRenderer'
 
 const props = defineProps<{ layers: LayerInfo[]; visible: string[] }>()
 const emit = defineEmits<{ toggle: [layerId: string] }>()
 
 const ordered = computed(() => layersTopDown(props.layers))
+const order = computed(() => ordered.value.map((layer) => layer.id))
 </script>
 
 <template>
@@ -19,6 +21,7 @@ const ordered = computed(() => layersTopDown(props.layers))
           :data-testid="`toggle-${layer.id}`"
           @change="emit('toggle', layer.id)"
         />
+        <span class="swatch" :style="{ background: layerColor(layer.id, order) }" />
         <strong>{{ layer.name }}</strong>
       </label>
       <div class="meta">
@@ -41,6 +44,13 @@ const ordered = computed(() => layersTopDown(props.layers))
 .layer-list li {
   padding: 0.4rem 0;
   border-bottom: 1px solid #8883;
+}
+.swatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 50%;
+  margin: 0 0.3rem;
 }
 .meta {
   font-size: 0.8em;

@@ -61,7 +61,7 @@ describe('TopologyView', () => {
     const wrapper = await mountView()
     expect(wrapper.get('[data-testid=flag]').text()).toBe('blueprint=b1')
     expect(mocked.getLayer).toHaveBeenCalledTimes(2)
-    expect(wrapper.get('[data-testid=viewer]').text()).toContain('layer1: 2 nodes')
+    expect(wrapper.find('[data-testid=force-svg]').exists()).toBe(true)
   })
 
   it('shows only the layers in the URL query', async () => {

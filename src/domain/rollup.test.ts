@@ -49,4 +49,25 @@ describe('rollupLinks', () => {
   it('has no diff label when no link has diff', () => {
     expect(rollupLinks({ tps, links: [link('a', 'n1/p1', 'n2/p1')] })[0]?.diff).toBeUndefined()
   })
+
+  it('keeps the term-points of expanded nodes (links are between term-points and nodes)', () => {
+    const links = [link('a', 'n1/p1', 'n2/p1'), link('b', 'n1/p2', 'n2/p2'), link('c', 'n1/p1', 'n3/p1')]
+    const result = rollupLinks({ tps, links }, new Set(['n1']))
+    expect(result.map((l) => [l.source, l.target]).sort()).toEqual([
+      ['n1/p1', 'n2'],
+      ['n1/p1', 'n3'],
+      ['n1/p2', 'n2'],
+    ])
+  })
+
+  it('links two expanded nodes at their term-points', () => {
+    const result = rollupLinks({ tps, links: [link('a', 'n1/p1', 'n2/p1')] }, new Set(['n1', 'n2']))
+    expect(result).toHaveLength(1)
+    expect([result[0]?.source, result[0]?.target].sort()).toEqual(['n1/p1', 'n2/p1'])
+  })
+
+  it('skips a link inside an expanded node only when both ends are the same term-point', () => {
+    const result = rollupLinks({ tps, links: [link('a', 'n1/p1', 'n1/p2')] }, new Set(['n1']))
+    expect(result).toHaveLength(1)
+  })
 })

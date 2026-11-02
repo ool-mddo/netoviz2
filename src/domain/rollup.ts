@@ -1,8 +1,11 @@
 import type { DiffLabel, LayerData } from '../api/types'
 
-/** Links between nodes: links between the term-points are bundled (both directions are one) */
+/**
+ * Links to show: links between the term-points are bundled (both directions are one).
+ * An endpoint is a node (collapsed) or a term-point (the node is expanded).
+ */
 export interface NodeLink {
-  /** ID made from the node IDs (not an ID of the server) */
+  /** ID made from the endpoints (not an ID of the server) */
   id: string
   source: string
   target: string
@@ -14,10 +17,14 @@ export interface NodeLink {
 
 /**
  * Bundle the links between term-points to the links between nodes (to show node-level topology).
+ * The term-points of `expanded` nodes are not rolled up: their links are shown between the term-points.
  * Links with an unknown endpoint are skipped. Links in the same node (loopback) are skipped.
  */
-export function rollupLinks(layer: Pick<LayerData, 'tps' | 'links'>): NodeLink[] {
-  const nodeOf = new Map(layer.tps.map((tp) => [tp.id, tp.node]))
+export function rollupLinks(
+  layer: Pick<LayerData, 'tps' | 'links'>,
+  expanded: ReadonlySet<string> = new Set(),
+): NodeLink[] {
+  const nodeOf = new Map(layer.tps.map((tp) => [tp.id, expanded.has(tp.node) ? tp.id : tp.node]))
   const bundles = new Map<string, NodeLink>()
   const diffs = new Map<string, Set<DiffLabel | 'kept'>>()
   for (const link of layer.links) {

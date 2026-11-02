@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import ForceView from '../components/ForceView.vue'
 import LayerList from '../components/LayerList.vue'
 import SummaryBar from '../components/SummaryBar.vue'
 import { defaultVisibleLayers } from '../domain/layers'
@@ -64,9 +65,7 @@ onBeforeUnmount(() => selection.select(null))
         <LayerList :layers="topology.summary.layers" :visible="visibleLayers" @toggle="toggleLayer" />
       </aside>
       <section class="viewer" data-testid="viewer">
-        <p v-for="id in visibleLayers" :key="id">
-          {{ id }}: {{ topology.layerData[id]?.nodes.length ?? '...' }} nodes
-        </p>
+        <ForceView :visible-layers="visibleLayers" />
       </section>
     </div>
   </template>
