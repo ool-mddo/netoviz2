@@ -48,6 +48,30 @@ describe('topology store', () => {
     expect(store.tpsOfNode.get('layer1/sw1')?.map((tp) => tp.name)).toEqual(['p1', 'p2'])
   })
 
+  it('does not request the same data twice at the same time', async () => {
+    const store = useTopologyStore()
+    await store.open('nw', 'ss')
+    await Promise.all([store.loadLayer('layer1'), store.loadLayer('layer1')])
+    await Promise.all([store.ensureSupports(), store.ensureSupports()])
+    await Promise.all([store.loadAttributes(['layer2/r1']), store.loadAttributes(['layer2/r1'])])
+    expect(mocked.getLayer).toHaveBeenCalledTimes(1)
+    expect(mocked.getSupports).toHaveBeenCalledTimes(1)
+    expect(mocked.getAttributes).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores the response of a request started before the topology was updated', async () => {
+    const store = useTopologyStore()
+    await store.open('nw', 'ss')
+    let resolveOld: (value: typeof layer1Data) => void = () => {}
+    mocked.getLayer.mockImplementationOnce(() => new Promise((resolve) => (resolveOld = resolve)))
+    const old = store.loadLayer('layer1')
+    mocked.getSummary.mockResolvedValueOnce(makeSummary({ etag: 'v1-2' }))
+    await store.refresh()
+    resolveOld({ ...layer1Data, etag: 'old' })
+    await old
+    expect(store.layerData['layer1']).toBeUndefined()
+  })
+
   it('loads supports once', async () => {
     const store = useTopologyStore()
     await store.open('nw', 'ss')

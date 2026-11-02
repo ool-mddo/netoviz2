@@ -5,10 +5,14 @@ import AttributePanel from '../components/AttributePanel.vue'
 import ForceView from '../components/ForceView.vue'
 import LayerList from '../components/LayerList.vue'
 import SummaryBar from '../components/SummaryBar.vue'
+import { usePolling } from '../composables/usePolling'
 import { useSelect } from '../composables/useSelect'
 import { defaultVisibleLayers } from '../domain/layers'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
+
+/** Interval to check the update of the topology */
+const RELOAD_INTERVAL_MS = 5000
 
 const props = defineProps<{ network: string; snapshot: string }>()
 const route = useRoute()
@@ -67,6 +71,14 @@ watch(
     void router.replace({ query })
   },
 )
+
+/** Auto reload: check the ETag of the summary and reload the data when the topology is updated */
+async function reload(): Promise<void> {
+  const updated = await topology.refresh()
+  // attributes are cleared by the reload: load them again for the selected object
+  if (updated && selection.selectedId) await selectObject(selection.selectedId)
+}
+usePolling(reload, RELOAD_INTERVAL_MS)
 
 function toggleLayer(layerId: string): void {
   const current = visibleLayers.value

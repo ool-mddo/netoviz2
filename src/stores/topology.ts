@@ -64,6 +64,7 @@ export const useTopologyStore = defineStore('topology', () => {
   /** Open a snapshot: get the summary (layers are loaded on demand) */
   async function open(nw: string, ss: string): Promise<void> {
     const current = ++generation
+    inflight.clear()
     network.value = nw
     snapshot.value = ss
     reset()
@@ -78,41 +79,75 @@ export const useTopologyStore = defineStore('topology', () => {
     }
   }
 
-  async function loadLayer(layerId: string): Promise<void> {
-    if (layerData.value[layerId]) return
-    const current = generation
-    try {
-      const data = await api.getLayer(network.value, snapshot.value, layerId)
-      if (current === generation) layerData.value = { ...layerData.value, [layerId]: data }
-    } catch (e) {
-      if (current === generation) error.value = messageOf(e)
-    }
+  /** Requests in progress (to not request the same data twice at the same time) */
+  const inflight = new Map<string, Promise<void>>()
+
+  /** Run the task unless the same task (key) is in progress; then wait for it */
+  function once(key: string, task: () => Promise<void>): Promise<void> {
+    const running = inflight.get(key)
+    if (running) return running
+    const promise = task().finally(() => {
+      if (inflight.get(key) === promise) inflight.delete(key)
+    })
+    inflight.set(key, promise)
+    return promise
   }
 
-  async function ensureSupports(): Promise<void> {
-    if (supportsLoaded.value) return
-    const current = generation
-    try {
-      const data = await api.getSupports(network.value, snapshot.value)
-      if (current === generation) {
-        supportIndex.value = new SupportIndex(data.supports)
-        supportsLoaded.value = true
+  function loadLayer(layerId: string): Promise<void> {
+    if (layerData.value[layerId]) return Promise.resolve()
+    return once(`layer:${layerId}`, async () => {
+      const current = generation
+      try {
+        const data = await api.getLayer(network.value, snapshot.value, layerId)
+        if (current === generation) layerData.value = { ...layerData.value, [layerId]: data }
+      } catch (e) {
+        if (current === generation) error.value = messageOf(e)
       }
-    } catch (e) {
-      if (current === generation) error.value = messageOf(e)
-    }
+    })
+  }
+
+  function ensureSupports(): Promise<void> {
+    if (supportsLoaded.value) return Promise.resolve()
+    return once('supports', async () => {
+      const current = generation
+      try {
+        const data = await api.getSupports(network.value, snapshot.value)
+        if (current === generation) {
+          supportIndex.value = new SupportIndex(data.supports)
+          supportsLoaded.value = true
+        }
+      } catch (e) {
+        if (current === generation) error.value = messageOf(e)
+      }
+    })
   }
 
   /** Load attributes of the objects which are not loaded yet */
   async function loadAttributes(ids: string[]): Promise<void> {
-    const missing = ids.filter((id) => !attributes.value[id])
-    if (missing.length === 0) return
+    const waits: Promise<void>[] = []
+    const fresh: string[] = []
+    for (const id of ids.filter((id) => !attributes.value[id])) {
+      const running = inflight.get(`attr:${id}`)
+      if (running) waits.push(running)
+      else fresh.push(id)
+    }
+    if (fresh.length > 0) {
+      const request = fetchAttributes(fresh)
+      for (const id of fresh) inflight.set(`attr:${id}`, request)
+      waits.push(request)
+    }
+    await Promise.all(waits)
+  }
+
+  async function fetchAttributes(ids: string[]): Promise<void> {
     const current = generation
     try {
-      const data = await api.getAttributes(network.value, snapshot.value, missing)
+      const data = await api.getAttributes(network.value, snapshot.value, ids)
       if (current === generation) attributes.value = { ...attributes.value, ...data.objects }
     } catch (e) {
       if (current === generation) error.value = messageOf(e)
+    } finally {
+      for (const id of ids) inflight.delete(`attr:${id}`)
     }
   }
 
@@ -130,6 +165,9 @@ export const useTopologyStore = defineStore('topology', () => {
 
       const loadedLayers = Object.keys(layerData.value)
       const hadSupports = supportsLoaded.value
+      // responses of the requests for the old data are ignored
+      generation++
+      inflight.clear()
       summary.value = updated
       error.value = null
       layerData.value = {}

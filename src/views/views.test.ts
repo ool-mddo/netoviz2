@@ -1,6 +1,6 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount as vueMount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api/client'
 import { router } from '../router'
 import { useSelectionStore } from '../stores/selection'
@@ -10,6 +10,18 @@ import TopologyView from './TopologyView.vue'
 
 vi.mock('../api/client')
 const mocked = vi.mocked(api)
+
+// The router is shared. Mounted views react to it, so they are unmounted after each test.
+const mounted: Array<{ unmount: () => void }> = []
+const mount = ((...args: Parameters<typeof vueMount>) => {
+  const wrapper = vueMount(...args)
+  mounted.push(wrapper)
+  return wrapper
+}) as typeof vueMount
+afterEach(() => {
+  vi.useRealTimers()
+  while (mounted.length > 0) mounted.pop()?.unmount()
+})
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -103,6 +115,39 @@ describe('TopologyView', () => {
     selection.select(null)
     await flushPromises()
     expect(router.currentRoute.value.query.sel).toBeUndefined()
+  })
+
+  describe('auto reload', () => {
+    async function mountWithTimers(path: string) {
+      await router.push(path)
+      await router.isReady()
+      vi.useFakeTimers()
+      const wrapper = mount(TopologyView, {
+        props: { network: 'nw', snapshot: 'ss' },
+        global: { plugins: [createPinia(), router] },
+      })
+      await flushPromises()
+      return wrapper
+    }
+
+    it('does not reload the layers when the topology is not updated', async () => {
+      await mountWithTimers('/nw/ss?layers=layer1')
+      mocked.getSummary.mockResolvedValue(null)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(mocked.getSummary).toHaveBeenLastCalledWith('nw', 'ss', 'v1-1')
+      expect(mocked.getLayer).toHaveBeenCalledTimes(1)
+    })
+
+    it('reloads the layers and the attributes of the selected object when the topology is updated', async () => {
+      mocked.getSupports.mockResolvedValue(supportsData)
+      mocked.getAttributes.mockResolvedValue(attributesData)
+      await mountWithTimers('/nw/ss?layers=layer1,layer2&sel=layer2%2Fr1')
+      expect(mocked.getAttributes).toHaveBeenCalledTimes(1)
+      mocked.getSummary.mockResolvedValue(makeSummary({ etag: 'v1-2' }))
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(mocked.getLayer).toHaveBeenCalledTimes(4)
+      expect(mocked.getAttributes).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('shows the error if the snapshot can not be loaded', async () => {
