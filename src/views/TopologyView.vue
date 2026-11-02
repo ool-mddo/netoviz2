@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AttributePanel from '../components/AttributePanel.vue'
 import ForceView from '../components/ForceView.vue'
 import LayerList from '../components/LayerList.vue'
 import SummaryBar from '../components/SummaryBar.vue'
@@ -67,6 +68,7 @@ onBeforeUnmount(() => selection.select(null))
       <section class="viewer" data-testid="viewer">
         <ForceView :visible-layers="visibleLayers" />
       </section>
+      <AttributePanel />
     </div>
   </template>
 </template>
@@ -74,7 +76,7 @@ onBeforeUnmount(() => selection.select(null))
 <style scoped>
 .layout {
   display: grid;
-  grid-template-columns: 16rem 1fr;
+  grid-template-columns: 16rem minmax(0, 1fr) 24rem;
   gap: 1rem;
   margin-top: 0.5rem;
 }

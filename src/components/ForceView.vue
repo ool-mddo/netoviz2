@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useSelect } from '../composables/useSelect'
 import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
@@ -46,18 +47,12 @@ const highlight = computed<Highlight>(() => {
   return { selectedId, tracedIds, traceEdges }
 })
 
-async function onSelect(id: string | null): Promise<void> {
-  selection.select(id)
-  if (id) {
-    // supports and attributes are loaded when they are needed
-    await Promise.all([topology.ensureSupports(), topology.loadAttributes([id])])
-  }
-}
+const selectObject = useSelect()
 
 onMounted(() => {
   if (!svgEl.value) return
   renderer = new ForceRenderer(svgEl.value, {
-    onSelect: (id) => void onSelect(id),
+    onSelect: (id) => void selectObject(id),
     onToggleExpand: (nodeId) => view.toggleExpand(nodeId),
   })
   renderer.setGraph(graph.value, layerOrder.value)
