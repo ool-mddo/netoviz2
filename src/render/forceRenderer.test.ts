@@ -192,6 +192,88 @@ describe('ForceRenderer', () => {
     expect(callbacks.onToggleExpand).toHaveBeenLastCalledWith('l1/a')
   })
 
+  describe('hover (the element under the pointer)', () => {
+    beforeEach(() => renderer.setGraph(graph, ['l1', 'l2']))
+
+    it('marks the element under the pointer and clears the mark when the pointer leaves', () => {
+      nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseenter'))
+      expect(nodeEl('l1/b').classList.contains('hover')).toBe(true)
+      expect(svg.querySelectorAll('g.node.hover')).toHaveLength(1)
+      nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseleave'))
+      expect(svg.querySelectorAll('g.node.hover')).toHaveLength(0)
+    })
+
+    it('marks only the element under the pointer when the pointer moves to another element', () => {
+      nodeEl('l1/a').dispatchEvent(new MouseEvent('mouseenter'))
+      nodeEl('l1/a').dispatchEvent(new MouseEvent('mouseleave'))
+      nodeEl('l2/r').dispatchEvent(new MouseEvent('mouseenter'))
+      expect([...svg.querySelectorAll('g.node.hover')].map((e) => e.getAttribute('data-id'))).toEqual([
+        'l2/r',
+      ])
+    })
+
+    it('marks the links of a hovered term-point', () => {
+      nodeEl('l1/a/p1').dispatchEvent(new MouseEvent('mouseenter'))
+      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(1)
+      nodeEl('l1/a/p1').dispatchEvent(new MouseEvent('mouseleave'))
+      nodeEl('l1/a/p2').dispatchEvent(new MouseEvent('mouseenter'))
+      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(0)
+    })
+
+    it('marks the links of the term-points of a hovered node', () => {
+      nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseenter'))
+      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(1)
+      nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseleave'))
+      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(0)
+    })
+
+    it('brings the hovered element to the front', () => {
+      nodeEl('l1/a').dispatchEvent(new MouseEvent('mouseenter'))
+      const order = [...svg.querySelectorAll('g.nodes > g.node')].map((e) => e.getAttribute('data-id'))
+      expect(order[order.length - 1]).toBe('l1/a')
+    })
+
+    it('keeps the mark when the graph is updated while the pointer is on the element', () => {
+      nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseenter'))
+      renderer.setGraph(graph, ['l1', 'l2'])
+      expect(nodeEl('l1/b').classList.contains('hover')).toBe(true)
+    })
+
+    it('marks an element hovered through its label (the label is a part of the element)', () => {
+      const label = nodeEl('l1/b').querySelector('text') as SVGTextElement
+      // entering the label enters the group of the element first
+      nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseenter'))
+      expect(label.parentElement?.classList.contains('hover')).toBe(true)
+    })
+  })
+
+  describe('label', () => {
+    beforeEach(() => renderer.setGraph(graph, ['l1', 'l2']))
+
+    it('selects the element by a click on the label', () => {
+      nodeEl('l1/b')
+        .querySelector('text')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      expect(callbacks.onSelect).toHaveBeenLastCalledWith('l1/b')
+      // not handled as a click on the background
+      expect(callbacks.onSelect).toHaveBeenCalledTimes(1)
+    })
+
+    it('selects a term-point by a click on its label', () => {
+      nodeEl('l1/a/p2')
+        .querySelector('text')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      expect(callbacks.onSelect).toHaveBeenLastCalledWith('l1/a/p2')
+    })
+
+    it('toggles the term-points by a double click on the label', () => {
+      nodeEl('l1/a')
+        .querySelector('text')
+        ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+      expect(callbacks.onToggleExpand).toHaveBeenLastCalledWith('l1/a')
+    })
+  })
+
   describe('highlight', () => {
     beforeEach(() => renderer.setGraph(graph, ['l1', 'l2']))
 

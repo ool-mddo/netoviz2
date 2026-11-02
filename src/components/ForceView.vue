@@ -155,7 +155,12 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
 .force-svg .node text {
   font-size: 10px;
   fill: currentColor;
-  pointer-events: none;
+  /* the label is a part of the object: it can be clicked and hovered like the circle */
+  cursor: pointer;
+  paint-order: stroke;
+  stroke: Canvas;
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 .force-svg .node.tp text {
   font-size: 7px;
@@ -179,6 +184,24 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
 .force-svg .node.selected circle {
   stroke: currentColor;
   stroke-width: 4;
+}
+/* the element under the pointer */
+.force-svg .node.hover circle {
+  stroke: currentColor;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 3px var(--layer-color));
+}
+.force-svg .node.hover text {
+  font-weight: bold;
+  display: block;
+}
+.force-svg .node.hover.dim,
+.force-svg .node.hover {
+  opacity: 1;
+}
+.force-svg .link.hover {
+  stroke: currentColor;
+  opacity: 1;
 }
 .force-svg .node.dim,
 .force-svg .link.dim {

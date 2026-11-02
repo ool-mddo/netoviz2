@@ -118,6 +118,8 @@ export class ForceRenderer {
   private layerOrder: readonly string[] = []
   private areaIndex = new Map<string, number>()
   private highlight: Highlight = NO_HIGHLIGHT
+  /** Element under the pointer (shown with its links) */
+  private hoverId: string | null = null
   private userMoved = false
   private ticks = 0
 
@@ -191,6 +193,7 @@ export class ForceRenderer {
     this.renderElements()
     this.placePorts()
     this.applyHighlight()
+    this.applyHover()
     this.draw()
   }
 
@@ -445,6 +448,12 @@ export class ForceRenderer {
         event.stopPropagation()
         this.callbacks.onToggleExpand(d.parent ?? d.id)
       })
+      .on('mouseenter', (event: Event, d) => {
+        // bring it to the front so that the element under the pointer is not hidden by the others
+        select(event.currentTarget as SVGGElement).raise()
+        this.setHover(d.id)
+      })
+      .on('mouseleave', () => this.setHover(null))
     nodeSelection
       .filter((d) => d.type === 'node')
       .call(
@@ -483,6 +492,22 @@ export class ForceRenderer {
       .classed('traced', (d) => d.id !== selectedId && tracedIds.has(d.id))
       .classed('dim', (d) => active && d.id !== selectedId && !tracedIds.has(d.id))
     this.linkLayer.selectAll<SVGLineElement, DisplayLink>('line').classed('dim', active)
+  }
+
+  /** Show the element under the pointer (a node, a term-point or its label) and the links of it */
+  private setHover(id: string | null): void {
+    this.hoverId = id
+    this.applyHover()
+  }
+
+  private applyHover(): void {
+    const id = this.hoverId
+    this.nodeLayer.selectAll<SVGGElement, Item>('g.node').classed('hover', (d) => d.id === id)
+    // the links of a node include the links of its term-points
+    const touches = (end: string) => id !== null && (end === id || this.itemById.get(end)?.parent === id)
+    this.linkLayer
+      .selectAll<SVGLineElement, DisplayLink>('line')
+      .classed('hover', (d) => touches(d.source) || touches(d.target))
   }
 
   /** The view follows the layout until the user moves the view */
