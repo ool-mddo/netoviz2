@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { DisplayGraph } from '../domain/graph'
 import { ForceRenderer, type Highlight } from './forceRenderer'
-import type { ElkLayoutFn, LayerLayoutFn, LayoutStats, Positions } from './layout/types'
+import type { LayerLayoutFn, LayoutStats, Positions } from './layout/types'
 
 /** nodes a, b, r; term-points of a (p1, p2) and b (p1); a/p1 - b/p1 are linked */
 const graph: DisplayGraph = {
@@ -328,54 +328,53 @@ describe('ForceRenderer', () => {
   })
 
   describe('layout engines', () => {
-    /** ELK is replaced by a function which puts the nodes on a line (the nodes of a layer are 100 apart) */
-    const lineLayout = (routes: Map<number, Array<{ x: number; y: number }>> = new Map()) =>
-      vi.fn<ElkLayoutFn>((_algorithm, nodes) =>
-        Promise.resolve({
-          positions: new Map(nodes.map((n, i) => [n.id, { x: i * 100 + 50, y: 50 }])) as Positions,
-          routes,
-        }),
+    /** The stress layout is replaced by a function which puts the nodes on a line (the nodes of a layer are 100 apart) */
+    const lineLayout = () =>
+      vi.fn<LayerLayoutFn>((nodes) =>
+        Promise.resolve(new Map(nodes.map((n, i) => [n.id, { x: i * 100 + 50, y: 50 }])) as Positions),
       )
     const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
-    const make = (elkLayout: ElkLayoutFn, onLayout?: (stats: LayoutStats | null) => void) => {
+    const make = (stressLayout: LayerLayoutFn, onLayout?: (stats: LayoutStats | null) => void) => {
       renderer.destroy()
       renderer = new ForceRenderer(svg, callbacks, {
         multiStart: 1,
-        engine: 'elk-layered',
-        elkLayout,
+        engine: 'stress',
+        stressLayout,
         onLayout,
       })
       return renderer
     }
 
-    it('puts the nodes at the positions given by ELK (the algorithm of the engine is used)', async () => {
-      const elk = lineLayout()
-      make(elk).setGraph(collapsed, ['l1', 'l2'])
+    it('puts the nodes at the positions of the stress layout', async () => {
+      make(lineLayout()).setGraph(collapsed, ['l1', 'l2'])
       await flush()
-      expect(elk.mock.calls.map((call) => call[0])).toEqual(['layered', 'layered'])
       // layer l1 (a, b) is in a line, 100 apart
       expect(pos('l1/b')[0] - pos('l1/a')[0]).toBeCloseTo(100, 3)
       expect(pos('l1/b')[1]).toBeCloseTo(pos('l1/a')[1], 3)
     })
 
     it('arranges each layer separately and puts the layouts of the layers apart from each other', async () => {
-      const elk = lineLayout()
-      make(elk).setGraph(collapsed, ['l1', 'l2'])
+      const layout = lineLayout()
+      make(layout).setGraph(collapsed, ['l1', 'l2'])
       await flush()
-      const layers = elk.mock.calls.map((call) => call[1].map((n) => n.id))
-      expect(layers).toEqual([['l1/a', 'l1/b'], ['l2/r']])
+      expect(layout.mock.calls.map((call) => call[0].map((n) => n.id))).toEqual([['l1/a', 'l1/b'], ['l2/r']])
       const [r, a, b] = [pos('l2/r'), pos('l1/a'), pos('l1/b')]
-      // the box of l1 is x: -r..., the layer l2 is next to it with a gap (no overlap)
       expect(Math.hypot(r[0] - a[0], r[1] - a[1])).toBeGreaterThan(40)
       expect(Math.hypot(r[0] - b[0], r[1] - b[1])).toBeGreaterThan(40)
     })
 
-    it('passes only the links in the layer to ELK', async () => {
-      const elk = lineLayout()
-      make(elk).setGraph(collapsed, ['l1', 'l2'])
+    it('passes only the links in the layer to the layout', async () => {
+      const layout = lineLayout()
+      make(layout).setGraph(collapsed, ['l1', 'l2'])
       await flush()
-      expect(elk.mock.calls[0]?.[2]).toEqual([{ source: 'l1/a', target: 'l1/b' }])
-      expect(elk.mock.calls[1]?.[2]).toEqual([])
+      expect(layout.mock.calls[0]?.[1]).toEqual([{ source: 'l1/a', target: 'l1/b' }])
+      expect(layout.mock.calls[1]?.[1]).toEqual([])
+    })
+
+    it('draws links straight between the nodes', async () => {
+      make(lineLayout()).setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      expect(pathPoints()).toEqual([pos('l1/a'), pos('l1/b')])
     })
 
     it('reports that the layout is in progress (null) and then the quality of the layout', async () => {
@@ -384,37 +383,34 @@ describe('ForceRenderer', () => {
       expect(reports).toEqual([null])
       await flush()
       expect(reports).toHaveLength(2)
-      expect(reports[1]).toMatchObject({ engine: 'elk-layered', nodes: 3, links: 1, crossings: 0 })
+      expect(reports[1]).toMatchObject({ engine: 'stress', nodes: 3, links: 1, crossings: 0 })
     })
 
     it('does not arrange the same graph again, and reports the last result', async () => {
-      const elk = lineLayout()
+      const layout = lineLayout()
       const reports: Array<LayoutStats | null> = []
-      const r = make(elk, (stats) => reports.push(stats))
+      const r = make(layout, (stats) => reports.push(stats))
       r.setGraph(collapsed, ['l1', 'l2'])
       await flush()
       r.setGraph(collapsed, ['l1', 'l2'])
       await flush()
-      expect(elk).toHaveBeenCalledTimes(2) // 2 layers, once
-      expect(reports.at(-1)?.engine).toBe('elk-layered')
+      expect(layout).toHaveBeenCalledTimes(2) // 2 layers, once
+      expect(reports.at(-1)?.engine).toBe('stress')
     })
 
     it('arranges again when the nodes are changed (e.g. the term-points are shown)', async () => {
-      const elk = lineLayout()
-      const r = make(elk)
+      const layout = lineLayout()
+      const r = make(layout)
       r.setGraph(collapsed, ['l1', 'l2'])
       await flush()
       r.setGraph(graph, ['l1', 'l2'])
       await flush()
-      expect(elk).toHaveBeenCalledTimes(4)
+      expect(layout).toHaveBeenCalledTimes(4)
     })
 
     it('ignores the result of an old layout when a newer one is started', async () => {
       const resolvers: Array<(positions: Positions) => void> = []
-      const slow = vi.fn<ElkLayoutFn>(
-        () =>
-          new Promise((resolve) => resolvers.push((positions) => resolve({ positions, routes: new Map() }))),
-      )
+      const slow = vi.fn<LayerLayoutFn>(() => new Promise((resolve) => resolvers.push(resolve)))
       const r = make(slow)
       r.setGraph({ nodes: collapsed.nodes.slice(0, 1), links: [] }, ['l1', 'l2'])
       r.setGraph({ nodes: collapsed.nodes.slice(0, 1), links: [] }, ['l1', 'l2']) // the layout is started again
@@ -426,27 +422,27 @@ describe('ForceRenderer', () => {
     })
 
     it('arranges again from scratch when the engine is changed (to force and back)', async () => {
-      const elk = lineLayout()
+      const layout = lineLayout()
       const reports: Array<LayoutStats | null> = []
-      const r = make(elk, (stats) => reports.push(stats))
+      const r = make(layout, (stats) => reports.push(stats))
       r.setGraph(collapsed, ['l1', 'l2'])
       await flush()
       r.setEngine('force')
       expect(reports.at(-1)).toMatchObject({ engine: 'force', nodes: 3 })
-      r.setEngine('elk-layered')
+      r.setEngine('stress')
       await flush()
-      expect(elk).toHaveBeenCalledTimes(4)
-      expect(reports.at(-1)).toMatchObject({ engine: 'elk-layered' })
+      expect(layout).toHaveBeenCalledTimes(4)
+      expect(reports.at(-1)).toMatchObject({ engine: 'stress' })
     })
 
     it('does nothing when the engine is not changed', async () => {
-      const elk = lineLayout()
-      const r = make(elk)
+      const layout = lineLayout()
+      const r = make(layout)
       r.setGraph(collapsed, ['l1', 'l2'])
       await flush()
-      r.setEngine('elk-layered')
+      r.setEngine('stress')
       await flush()
-      expect(elk).toHaveBeenCalledTimes(2)
+      expect(layout).toHaveBeenCalledTimes(2)
     })
 
     it('reports the quality of the force layout too', () => {
@@ -458,81 +454,7 @@ describe('ForceRenderer', () => {
       expect(reports.at(-1)?.ms).toBeGreaterThanOrEqual(0)
     })
 
-    it('draws a link through the bend points given by ELK (moved with the layout of the layer)', async () => {
-      // link 0 of the layer l1 is a -> b: bend points at (150, 200)
-      make(lineLayout(new Map([[0, [{ x: 150, y: 200 }]]]))).setGraph(collapsed, ['l1', 'l2'])
-      await flush()
-      const [a, b] = [pos('l1/a'), pos('l1/b')]
-      // a and b are at (50,50) and (150,50) in the layout of the layer: the bend point is 150 below the line of the nodes
-      expect(pathPoints()).toEqual([a, [b[0], b[1] + 150], b])
-    })
-
-    it('draws the bend points in the reverse order for a link in the other direction', async () => {
-      const bends = [
-        { x: 100, y: 200 },
-        { x: 200, y: 200 },
-      ]
-      const reverse: DisplayGraph = {
-        ...collapsed,
-        links: [{ id: 'k', source: 'l1/b', target: 'l1/a', type: 'link', count: 1 }],
-      }
-      // the link (b -> a) is given to ELK as b -> a: the bend points are from b to a
-      make(lineLayout(new Map([[0, bends]]))).setGraph(reverse, ['l1', 'l2'])
-      await flush()
-      const [a, b] = [pos('l1/a'), pos('l1/b')]
-      const points = pathPoints()
-      expect(points[0]).toEqual(b)
-      expect(points[3]).toEqual(a)
-      expect(points[1]?.[0]).toBeLessThan(points[2]?.[0] ?? 0)
-    })
-
-    it('draws a link straight when the engine is changed to force (the routes are forgotten)', async () => {
-      const r = make(lineLayout(new Map([[0, [{ x: 150, y: 200 }]]])))
-      r.setGraph(collapsed, ['l1', 'l2'])
-      await flush()
-      expect(pathPoints()).toHaveLength(3)
-      r.setEngine('force')
-      expect(pathPoints()).toHaveLength(2)
-    })
-
-    it('counts the crossings with the routes (a link around a node does not cross the other link)', async () => {
-      const reports: Array<LayoutStats | null> = []
-      // the layer l1: a, b on a line, and a link a - b. Another layer would not matter.
-      make(lineLayout(new Map([[0, [{ x: 100, y: 500 }]]])), (stats) => reports.push(stats)).setGraph(
-        collapsed,
-        ['l1', 'l2'],
-      )
-      await flush()
-      expect(reports.at(-1)).toMatchObject({ crossings: 0 })
-    })
-
-    it('arranges with the own stress layout when the engine is stress (ELK is not used)', async () => {
-      const elk = lineLayout()
-      const stress = vi.fn<LayerLayoutFn>((nodes) =>
-        Promise.resolve({
-          positions: new Map(nodes.map((n, i) => [n.id, { x: i * 200 + 50, y: 50 }])) as Positions,
-          routes: new Map(),
-        }),
-      )
-      const reports: Array<LayoutStats | null> = []
-      renderer.destroy()
-      renderer = new ForceRenderer(svg, callbacks, {
-        multiStart: 1,
-        engine: 'stress',
-        elkLayout: elk,
-        stressLayout: stress,
-        onLayout: (s) => reports.push(s),
-      })
-      renderer.setGraph(collapsed, ['l1', 'l2'])
-      await flush()
-      expect(elk).not.toHaveBeenCalled()
-      expect(stress).toHaveBeenCalledTimes(2) // one for each layer
-      expect(stress.mock.calls[0]?.[0].map((n) => n.id)).toEqual(['l1/a', 'l1/b'])
-      expect(pos('l1/b')[0] - pos('l1/a')[0]).toBeCloseTo(200, 3)
-      expect(reports.at(-1)).toMatchObject({ engine: 'stress', nodes: 3 })
-    })
-
-    it('arranges with the real own stress layout by default (no node overlaps)', async () => {
+    it('arranges with the real stress layout (no overlaps or crossings)', async () => {
       renderer.destroy()
       const reports: Array<LayoutStats | null> = []
       renderer = new ForceRenderer(svg, callbacks, { engine: 'stress', onLayout: (s) => reports.push(s) })
@@ -541,23 +463,7 @@ describe('ForceRenderer', () => {
       expect(reports.at(-1)).toMatchObject({ engine: 'stress', crossings: 0, overlap: 0 })
     })
 
-    it('can be changed between force, stress and ELK', async () => {
-      const reports: Array<LayoutStats | null> = []
-      renderer.destroy()
-      renderer = new ForceRenderer(svg, callbacks, {
-        multiStart: 1,
-        elkLayout: lineLayout(),
-        onLayout: (s) => reports.push(s),
-      })
-      renderer.setGraph(collapsed, ['l1', 'l2'])
-      for (const engine of ['stress', 'elk-stress', 'force'] as const) {
-        renderer.setEngine(engine)
-        await flush()
-        expect(reports.at(-1)).toMatchObject({ engine, nodes: 3 })
-      }
-    })
-
-    it('puts the term-points on the circles of the nodes with ELK, too', async () => {
+    it('puts the term-points on the circles of the nodes with the stress layout, too', async () => {
       make(lineLayout()).setGraph(graph, ['l1', 'l2'])
       await flush()
       const [ax, ay] = pos('l1/a')

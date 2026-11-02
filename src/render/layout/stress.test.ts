@@ -17,7 +17,7 @@ function seeded(seed: number): () => number {
 const node = (id: string, radius = 11): LayoutNode => ({ id, radius })
 const link = (source: string, target: string): LayoutLink => ({ source, target })
 const run = (nodes: LayoutNode[], links: LayoutLink[], seed = 1) =>
-  layoutWithStress(nodes, links, { random: seeded(seed) }).positions
+  layoutWithStress(nodes, links, { random: seeded(seed) })
 const placed = (nodes: LayoutNode[], positions: Map<string, { x: number; y: number }>) =>
   nodes.map((n) => ({ ...n, ...(positions.get(n.id) ?? { x: NaN, y: NaN }) }))
 const distance = (positions: Map<string, { x: number; y: number }>, a: string, b: string) => {
@@ -32,14 +32,11 @@ describe('layoutWithStress', () => {
     expect(one.get('a')).toEqual({ x: 11, y: 11 })
   })
 
-  it('gives a finite position to each node and has no route (links are straight)', () => {
+  it('gives a finite position to each node', () => {
     const nodes = ['a', 'b', 'c', 'd'].map((id) => node(id))
-    const result = layoutWithStress(nodes, [link('a', 'b'), link('b', 'c'), link('c', 'd')], {
-      random: seeded(3),
-    })
-    expect(result.routes.size).toBe(0)
+    const positions = run(nodes, [link('a', 'b'), link('b', 'c'), link('c', 'd')], 3)
     for (const n of nodes) {
-      const p = result.positions.get(n.id)
+      const p = positions.get(n.id)
       expect(Number.isFinite(p?.x) && Number.isFinite(p?.y)).toBe(true)
     }
   })

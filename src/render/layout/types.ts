@@ -1,35 +1,21 @@
-/** Layout engines to compare */
-export type LayoutEngine = 'force' | 'stress' | 'elk-layered' | 'elk-stress' | 'elk-force'
+/**
+ * Layout engines:
+ * - force: d3-force (a simulation; the layout is made several times from random starts and the best one is used)
+ * - stress: stress majorization (own implementation, see stress.ts)
+ */
+export type LayoutEngine = 'force' | 'stress'
 
 export const LAYOUT_ENGINES: ReadonlyArray<{ id: LayoutEngine; label: string }> = [
   { id: 'force', label: 'force (d3-force)' },
-  { id: 'stress', label: 'stress (own)' },
-  { id: 'elk-layered', label: 'ELK layered' },
-  { id: 'elk-stress', label: 'ELK stress' },
-  { id: 'elk-force', label: 'ELK force' },
+  { id: 'stress', label: 'stress' },
 ]
 
-export const DEFAULT_LAYOUT_ENGINE: LayoutEngine = 'force'
+/** Layout engine used when it is not specified */
+export const DEFAULT_LAYOUT_ENGINE: LayoutEngine = 'stress'
 
 /** @returns the engine if the value is a valid one (e.g. a value of the URL query), otherwise undefined */
 export function parseLayoutEngine(value: unknown): LayoutEngine | undefined {
   return LAYOUT_ENGINES.find((engine) => engine.id === value)?.id
-}
-
-export type ElkAlgorithm = 'layered' | 'stress' | 'force'
-
-/** @returns the algorithm of ELK for the engine (undefined for the engines which are not ELK) */
-export function elkAlgorithmOf(engine: LayoutEngine): ElkAlgorithm | undefined {
-  switch (engine) {
-    case 'elk-layered':
-      return 'layered'
-    case 'elk-stress':
-      return 'stress'
-    case 'elk-force':
-      return 'force'
-    default:
-      return undefined
-  }
 }
 
 export interface Position {
@@ -51,26 +37,8 @@ export interface LayoutLink {
   target: string
 }
 
-/** Result of ELK for a layer */
-export interface ElkLayoutResult {
-  positions: Positions
-  /** Bend points of the links (by the index in the links given to ELK), from the source to the target.
-   * Links drawn straight are not in it. */
-  routes: Map<number, Position[]>
-}
-
 /** Function to arrange the nodes of a layer (the engines other than force) */
-export type LayerLayoutFn = (
-  nodes: readonly LayoutNode[],
-  links: readonly LayoutLink[],
-) => Promise<ElkLayoutResult>
-
-/** Function to arrange the nodes of a layer with ELK */
-export type ElkLayoutFn = (
-  algorithm: ElkAlgorithm,
-  nodes: readonly LayoutNode[],
-  links: readonly LayoutLink[],
-) => Promise<ElkLayoutResult>
+export type LayerLayoutFn = (nodes: readonly LayoutNode[], links: readonly LayoutLink[]) => Promise<Positions>
 
 /** Result of a layout (for comparison of the engines) */
 export interface LayoutStats {

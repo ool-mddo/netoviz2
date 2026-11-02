@@ -95,12 +95,9 @@ function setEngineQuery(key: 'layout' | 'compare', engine: LayoutEngine | null):
   else query[key] = engine
   void router.replace({ query })
 }
-/**
- * Compare with another engine: the own stress layout and ELK stress (the same kind of algorithms) are compared with
- * each other, and the other engines with the own stress layout
- */
+/** Compare with the other engine */
 function setCompare(on: boolean): void {
-  const other: LayoutEngine = engineA.value === 'stress' ? 'elk-stress' : 'stress'
+  const other: LayoutEngine = engineA.value === 'stress' ? 'force' : 'stress'
   setEngineQuery('compare', on ? other : null)
 }
 

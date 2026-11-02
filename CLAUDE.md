@@ -12,8 +12,8 @@ ool-mddo の汎用トポロジビューワー (Vite + Vue 3 + TypeScript の SPA
 - ユースケース名・ネットワーク名・レイヤの種類 (`kind`)・属性スキーマに依存する分岐を入れない。未知のものは汎用の表示にフォールバックする。
 - オブジェクトの ID は不透明な文字列として扱う (分解しない)。例外は、先頭のセグメントが layer の ID であること (仕様で保証) を使う `layerOfId` のみ。
 - 選択・support のトレース・属性表示は Viewer によらず共通の部品 (`src/domain/`, `src/stores/`) で実装する。描画 (Viewer) はその上に載せる。
-- 描画ライブラリは差し替えられる構造にする (まず d3-force + SVG)。レイアウトも `src/render/layout/` のエンジン (force / 自前の stress (`stress.ts`) / ELK) として差し替えられる。
-- ELK (elkjs) のライセンスは EPL-2.0 OR GPL-3.0-or-later で、本リポジトリ (MIT) と異なる。検証用に使っている。本採用の前にライセンスを確認する。
+- 描画ライブラリは差し替えられる構造にする (まず d3-force + SVG)。レイアウトも `src/render/layout/` のエンジン (force と、自前の stress (`stress.ts`)。既定は stress) として差し替えられる。設計と検討の経緯は playground の `docs/design_notes/netoviz2_layout.md`。
+- 依存は寛容なライセンス (MIT / ISC / BSD 系) のものにする。ELK (elkjs, EPL-2.0) は検証したうえで採用しなかった (理由とライセンスの分析は上記の設計ドキュメント)。依存を追加するときは、ライセンスを確認する。
 
 ## 動作確認
 

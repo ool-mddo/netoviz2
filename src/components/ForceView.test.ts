@@ -166,15 +166,9 @@ describe('ForceView', () => {
       current = wrapper
       const select = wrapper.get('[data-testid=layout-select]')
       expect((select.element as HTMLSelectElement).value).toBe('force')
-      expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual([
-        'force',
-        'stress',
-        'elk-layered',
-        'elk-stress',
-        'elk-force',
-      ])
-      await select.setValue('elk-stress')
-      expect(wrapper.emitted('update:engine')?.[0]).toEqual(['elk-stress'])
+      expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual(['force', 'stress'])
+      await select.setValue('stress')
+      expect(wrapper.emitted('update:engine')?.[0]).toEqual(['stress'])
     })
 
     it('shows the quality of the layout (time, crossings, overlaps)', async () => {
@@ -188,9 +182,9 @@ describe('ForceView', () => {
     it('arranges again with the new engine when the engine is changed', async () => {
       const { wrapper } = await mountView()
       current = wrapper
-      await wrapper.setProps({ engine: 'elk-layered' })
+      await wrapper.setProps({ engine: 'stress' })
       await vi.waitFor(() =>
-        expect(wrapper.get('[data-testid=layout-stats]').attributes('data-engine')).toBe('elk-layered'),
+        expect(wrapper.get('[data-testid=layout-stats]').attributes('data-engine')).toBe('stress'),
       )
       expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
     })

@@ -182,38 +182,37 @@ describe('TopologyView', () => {
 
   describe('layout engines', () => {
     const svgCount = (wrapper: ReturnType<typeof mount>) => wrapper.findAll('[data-testid=force-svg]').length
+    const selected = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.findAll('[data-testid=layout-select]').map((s) => (s.element as HTMLSelectElement).value)
 
-    it('shows one view with the force layout by default', async () => {
+    it('shows one view with the stress layout by default', async () => {
       const wrapper = await mountView('/nw/ss')
       expect(svgCount(wrapper)).toBe(1)
-      expect(wrapper.get('[data-testid=layout-select]').element).toHaveProperty('value', 'force')
+      expect(selected(wrapper)).toEqual(['stress'])
     })
 
     it('uses the engine in the URL query (?layout=)', async () => {
-      const wrapper = await mountView('/nw/ss?layout=elk-stress')
-      expect(wrapper.get('[data-testid=layout-select]').element).toHaveProperty('value', 'elk-stress')
+      const wrapper = await mountView('/nw/ss?layout=force')
+      expect(selected(wrapper)).toEqual(['force'])
     })
 
-    it('ignores an unknown engine in the URL query', async () => {
-      const wrapper = await mountView('/nw/ss?layout=nothing&compare=nothing')
-      expect(wrapper.get('[data-testid=layout-select]').element).toHaveProperty('value', 'force')
+    it('ignores an unknown engine in the URL query (e.g. an engine which was removed)', async () => {
+      const wrapper = await mountView('/nw/ss?layout=elk-stress&compare=elk-layered')
+      expect(selected(wrapper)).toEqual(['stress'])
       expect(svgCount(wrapper)).toBe(1)
     })
 
     it('shows two views side by side with ?compare=', async () => {
-      const wrapper = await mountView('/nw/ss?compare=elk-layered')
+      const wrapper = await mountView('/nw/ss?compare=force')
       expect(svgCount(wrapper)).toBe(2)
-      const engines = wrapper
-        .findAll('[data-testid=layout-select]')
-        .map((s) => (s.element as HTMLSelectElement).value)
-      expect(engines).toEqual(['force', 'elk-layered'])
+      expect(selected(wrapper)).toEqual(['stress', 'force'])
     })
 
-    it('starts the comparison with the toolbar (the own stress layout) and stops it', async () => {
+    it('starts the comparison with the toolbar (with force) and stops it', async () => {
       const wrapper = await mountView('/nw/ss')
       await wrapper.get('[data-testid=compare]').setValue(true)
       await flushPromises()
-      expect(router.currentRoute.value.query.compare).toBe('stress')
+      expect(router.currentRoute.value.query.compare).toBe('force')
       expect(svgCount(wrapper)).toBe(2)
       await wrapper.get('[data-testid=compare]').setValue(false)
       await flushPromises()
@@ -221,15 +220,8 @@ describe('TopologyView', () => {
       expect(svgCount(wrapper)).toBe(1)
     })
 
-    it('compares the own stress layout with ELK stress (the same kind of algorithms)', async () => {
-      const wrapper = await mountView('/nw/ss?layout=stress')
-      await wrapper.get('[data-testid=compare]').setValue(true)
-      await flushPromises()
-      expect(router.currentRoute.value.query.compare).toBe('elk-stress')
-    })
-
-    it('compares the engines other than the own stress layout with it', async () => {
-      const wrapper = await mountView('/nw/ss?layout=elk-force')
+    it('compares force with the stress layout', async () => {
+      const wrapper = await mountView('/nw/ss?layout=force')
       await wrapper.get('[data-testid=compare]').setValue(true)
       await flushPromises()
       expect(router.currentRoute.value.query.compare).toBe('stress')
@@ -237,10 +229,10 @@ describe('TopologyView', () => {
 
     it('puts the changed engine into the URL (the default engine is not put)', async () => {
       const wrapper = await mountView('/nw/ss')
-      await wrapper.get('[data-testid=layout-select]').setValue('elk-layered')
-      await flushPromises()
-      expect(router.currentRoute.value.query.layout).toBe('elk-layered')
       await wrapper.get('[data-testid=layout-select]').setValue('force')
+      await flushPromises()
+      expect(router.currentRoute.value.query.layout).toBe('force')
+      await wrapper.get('[data-testid=layout-select]').setValue('stress')
       await flushPromises()
       expect(router.currentRoute.value.query.layout).toBeUndefined()
     })

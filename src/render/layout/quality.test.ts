@@ -29,20 +29,4 @@ describe('layoutQuality', () => {
       overlap: 0,
     })
   })
-
-  it('counts the crossings of a link with bend points as a polyline', () => {
-    const nodes = [node('a', 0, 0), node('b', 100, 0), node('c', 50, -50), node('d', 50, 50)]
-    // c-d is a vertical line at x=50 (y: -50..50). The straight link a-b crosses it
-    const straight = layoutQuality(nodes, [
-      { source: 'a', target: 'b' },
-      { source: 'c', target: 'd' },
-    ])
-    expect(straight.crossings).toBe(1)
-    // a-b through (50, 80) goes around the end of c-d
-    const bent = layoutQuality(nodes, [
-      { source: 'a', target: 'b', via: [{ x: 50, y: 80 }] },
-      { source: 'c', target: 'd' },
-    ])
-    expect(bent.crossings).toBe(0)
-  })
 })

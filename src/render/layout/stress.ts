@@ -1,6 +1,6 @@
 import { countCrossings, overlapDepth, type Segment } from '../../domain/layoutScore'
 import { packBoxes } from './pack'
-import type { ElkLayoutResult, LayoutLink, LayoutNode, Position, Positions } from './types'
+import type { LayoutLink, LayoutNode, Position, Positions } from './types'
 
 /**
  * Stress majorization layout (Gansner, Koren, North: "Graph Drawing by Stress Majorization", 2004).
@@ -38,7 +38,7 @@ export function layoutWithStress(
   nodes: readonly LayoutNode[],
   links: readonly LayoutLink[],
   options: StressOptions = {},
-): ElkLayoutResult {
+): Positions {
   const opt = { ...DEFAULTS, random: Math.random, ...options }
   const deadline = performance.now() + opt.budgetMs
   const byId = new Map(nodes.map((node) => [node.id, node]))
@@ -53,7 +53,7 @@ export function layoutWithStress(
     const offset = offsets.get(String(i)) ?? { x: 0, y: 0 }
     for (const [id, p] of layout.positions) positions.set(id, { x: p.x + offset.x, y: p.y + offset.y })
   })
-  return { positions, routes: new Map() }
+  return positions
 }
 
 interface Edge {
