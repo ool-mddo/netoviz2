@@ -4,16 +4,26 @@ import { useSelect } from '../composables/useSelect'
 import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
-import { useSelectionStore, type TraceMode } from '../stores/selection'
+import {
+  LAYOUT_ENGINES,
+  parseLayoutEngine,
+  type LayoutEngine,
+  type LayoutStats,
+} from '../render/layout/types'
+import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 import { useViewStore } from '../stores/view'
 
-const props = defineProps<{ visibleLayers: string[] }>()
+const props = defineProps<{ visibleLayers: string[]; engine: LayoutEngine }>()
+const emit = defineEmits<{ 'update:engine': [engine: LayoutEngine] }>()
 
 const topology = useTopologyStore()
 const selection = useSelectionStore()
 const view = useViewStore()
 const svgEl = ref<SVGSVGElement | null>(null)
+/** Result of the last layout (to compare the engines) and whether a layout is in progress */
+const stats = ref<LayoutStats | null>(null)
+const arranging = ref(false)
 let renderer: ForceRenderer | null = null
 
 /** Stable order of all layers (colors do not change by showing/hiding layers) */
@@ -33,7 +43,6 @@ const expanded = computed(() =>
     tpCount.value,
   ),
 )
-const portsOn = computed(() => view.portsByDefault(tpCount.value))
 const graph = computed(() => buildDisplayGraph(visibleData.value, expanded.value))
 const shownIds = computed(() => new Set(graph.value.nodes.map((node) => node.id)))
 
@@ -60,44 +69,64 @@ const selectObject = useSelect()
 
 onMounted(() => {
   if (!svgEl.value) return
-  renderer = new ForceRenderer(svgEl.value, {
-    onSelect: (id) => void selectObject(id),
-    onToggleExpand: (nodeId) => view.toggleExpand(nodeId),
-  })
-  renderer.setGraph(graph.value, layerOrder.value)
+  renderer = new ForceRenderer(
+    svgEl.value,
+    {
+      onSelect: (id) => void selectObject(id),
+      onToggleExpand: (nodeId) => view.toggleExpand(nodeId),
+    },
+    {
+      engine: props.engine,
+      onLayout: (result) => {
+        arranging.value = result === null
+        if (result) stats.value = result
+      },
+    },
+  )
+  if (loaded.value) renderer.setGraph(graph.value, layerOrder.value)
   renderer.setHighlight(highlight.value)
 })
 onBeforeUnmount(() => renderer?.destroy())
 
+/** All the visible layers are loaded (the layout is made after that, not for each layer) */
+const loaded = computed(() => props.visibleLayers.every((id) => topology.layerData[id]))
+
 watch(graph, () => {
+  if (!loaded.value) return
   renderer?.setGraph(graph.value, layerOrder.value)
   renderer?.setHighlight(highlight.value)
 })
 watch(highlight, () => renderer?.setHighlight(highlight.value))
+watch(
+  () => props.engine,
+  (engine) => renderer?.setEngine(engine),
+)
 
-const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
+const statsText = computed(() => {
+  const s = stats.value
+  if (!s) return ''
+  return `${s.ms} ms / crossings ${s.crossings} / overlap ${s.overlap.toFixed(1)} / ${s.nodes} nodes, ${s.links} links`
+})
+
+function onEngineChange(event: Event): void {
+  const engine = parseLayoutEngine((event.target as HTMLSelectElement).value)
+  if (engine) emit('update:engine', engine)
+}
 </script>
 
 <template>
-  <div class="force-view">
+  <div class="force-view" :data-engine="engine">
     <div class="toolbar">
-      <button type="button" data-testid="fit" @click="renderer?.fit()">Fit</button>
       <label>
-        <input
-          type="checkbox"
-          :checked="portsOn"
-          data-testid="show-ports"
-          @change="view.setShowPorts(($event.target as HTMLInputElement).checked)"
-        />
-        Term-points
-      </label>
-      <label>
-        Trace
-        <select v-model="selection.traceMode" data-testid="trace-mode">
-          <option v-for="mode in traceModes" :key="mode" :value="mode">{{ mode }}</option>
+        Layout
+        <select :value="engine" data-testid="layout-select" @change="onEngineChange">
+          <option v-for="item in LAYOUT_ENGINES" :key="item.id" :value="item.id">{{ item.label }}</option>
         </select>
       </label>
-      <span class="hint">click: select / double click: show or hide the term-points of the node</span>
+      <button type="button" data-testid="fit" @click="renderer?.fit()">Fit</button>
+      <span class="stats" data-testid="layout-stats" :data-engine="stats?.engine">{{
+        arranging ? 'arranging...' : statsText
+      }}</span>
     </div>
     <svg ref="svgEl" class="force-svg" data-testid="force-svg" />
   </div>
@@ -110,9 +139,9 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
   gap: 0.75rem;
   margin-bottom: 0.25rem;
 }
-.force-view .hint {
-  opacity: 0.6;
-  font-size: 0.85em;
+.force-view .stats {
+  opacity: 0.7;
+  font-size: 0.8em;
 }
 .force-svg {
   width: 100%;
@@ -121,6 +150,7 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
   cursor: grab;
 }
 .force-svg .link {
+  fill: none;
   stroke: #8888;
 }
 .force-svg .link.diff-added {

@@ -19,7 +19,7 @@ async function mountView(visibleLayers = ['layer1', 'layer2'], loadedLayers = vi
   await Promise.all(loadedLayers.map((id) => topology.loadLayer(id)))
   await topology.ensureSupports()
   const wrapper = mount(ForceView, {
-    props: { visibleLayers },
+    props: { visibleLayers, engine: 'force' as const },
     global: { plugins: [pinia] },
     attachTo: document.body,
   })
@@ -56,6 +56,15 @@ describe('ForceView', () => {
     expect(count(wrapper, 'g.node.tp')).toBe(4)
   })
 
+  it('arranges the nodes after all the visible layers are loaded (not for each layer)', async () => {
+    const { wrapper, topology } = await mountView(['layer1', 'layer2'], ['layer1'])
+    current = wrapper
+    expect(count(wrapper, 'g.node')).toBe(0)
+    await topology.loadLayer('layer2')
+    await flushPromises()
+    expect(count(wrapper, 'g.node')).toBe(7)
+  })
+
   it('draws only the visible layers', async () => {
     const { wrapper } = await mountView(['layer2'])
     current = wrapper
@@ -86,31 +95,21 @@ describe('ForceView', () => {
     const { wrapper, selection } = await mountView()
     current = wrapper
     selection.select('layer2/r1')
-    await wrapper.get('[data-testid=trace-mode]').setValue('off')
-    expect(selection.traceMode).toBe('off')
+    selection.traceMode = 'off'
+    await flushPromises()
     expect(count(wrapper, 'g.node.traced, g.node.dim')).toBe(0)
   })
 
   it('highlights the selected term-point itself, and shows it as its node when term-points are hidden', async () => {
-    const { wrapper, selection } = await mountView()
+    const { wrapper, selection, view } = await mountView()
     current = wrapper
     selection.select('layer1/sw1/p1')
     await flushPromises()
     expect(nodeEl(wrapper, 'layer1/sw1/p1').classList.contains('selected')).toBe(true)
-    await wrapper.get('[data-testid=show-ports]').setValue(false)
+    view.setShowPorts(false)
+    await flushPromises()
     expect(count(wrapper, 'g.node.tp')).toBe(0)
     expect(nodeEl(wrapper, 'layer1/sw1').classList.contains('selected')).toBe(true)
-  })
-
-  it('shows or hides the term-points of all nodes with the checkbox', async () => {
-    const { wrapper } = await mountView()
-    current = wrapper
-    const box = wrapper.get('[data-testid=show-ports]')
-    expect((box.element as HTMLInputElement).checked).toBe(true)
-    await box.setValue(false)
-    expect(count(wrapper, 'g.node')).toBe(3)
-    await box.setValue(true)
-    expect(count(wrapper, 'g.node')).toBe(7)
   })
 
   it('hides the term-points of one node by double click (and shows them again)', async () => {
@@ -159,5 +158,40 @@ describe('ForceView', () => {
     expect(topology.layerData['layer1']).toBeDefined()
     // the layer is loaded only for names: it is not drawn (not visible)
     expect(wrapper.element.querySelectorAll('g.node:not(.tp)')).toHaveLength(1)
+  })
+
+  describe('layout engine', () => {
+    it('has a selector of the engines (the current one is selected) and tells the change', async () => {
+      const { wrapper } = await mountView()
+      current = wrapper
+      const select = wrapper.get('[data-testid=layout-select]')
+      expect((select.element as HTMLSelectElement).value).toBe('force')
+      expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual([
+        'force',
+        'elk-layered',
+        'elk-stress',
+        'elk-force',
+      ])
+      await select.setValue('elk-stress')
+      expect(wrapper.emitted('update:engine')?.[0]).toEqual(['elk-stress'])
+    })
+
+    it('shows the quality of the layout (time, crossings, overlaps)', async () => {
+      const { wrapper } = await mountView()
+      current = wrapper
+      const text = wrapper.get('[data-testid=layout-stats]').text()
+      expect(text).toMatch(/\d+ ms \/ crossings \d+ \/ overlap [\d.]+ \/ 3 nodes, 1 links/)
+      expect(wrapper.get('[data-testid=layout-stats]').attributes('data-engine')).toBe('force')
+    })
+
+    it('arranges again with the new engine when the engine is changed', async () => {
+      const { wrapper } = await mountView()
+      current = wrapper
+      await wrapper.setProps({ engine: 'elk-layered' })
+      await vi.waitFor(() =>
+        expect(wrapper.get('[data-testid=layout-stats]').attributes('data-engine')).toBe('elk-layered'),
+      )
+      expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
+    })
   })
 })

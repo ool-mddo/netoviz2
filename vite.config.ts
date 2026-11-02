@@ -7,6 +7,10 @@ const apiUrl = process.env.NETOVIZ2_API_URL ?? 'http://localhost:15000'
 
 export default defineConfig({
   base: '/netoviz2/',
+  build: {
+    // ELK (layout engine, about 1.5MB) is a separate chunk which is loaded only when it is used
+    chunkSizeWarningLimit: 1600,
+  },
   plugins: [vue()],
   server: {
     proxy: {

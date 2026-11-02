@@ -180,6 +180,73 @@ describe('TopologyView', () => {
     })
   })
 
+  describe('layout engines', () => {
+    const svgCount = (wrapper: ReturnType<typeof mount>) => wrapper.findAll('[data-testid=force-svg]').length
+
+    it('shows one view with the force layout by default', async () => {
+      const wrapper = await mountView('/nw/ss')
+      expect(svgCount(wrapper)).toBe(1)
+      expect(wrapper.get('[data-testid=layout-select]').element).toHaveProperty('value', 'force')
+    })
+
+    it('uses the engine in the URL query (?layout=)', async () => {
+      const wrapper = await mountView('/nw/ss?layout=elk-stress')
+      expect(wrapper.get('[data-testid=layout-select]').element).toHaveProperty('value', 'elk-stress')
+    })
+
+    it('ignores an unknown engine in the URL query', async () => {
+      const wrapper = await mountView('/nw/ss?layout=nothing&compare=nothing')
+      expect(wrapper.get('[data-testid=layout-select]').element).toHaveProperty('value', 'force')
+      expect(svgCount(wrapper)).toBe(1)
+    })
+
+    it('shows two views side by side with ?compare=', async () => {
+      const wrapper = await mountView('/nw/ss?compare=elk-layered')
+      expect(svgCount(wrapper)).toBe(2)
+      const engines = wrapper
+        .findAll('[data-testid=layout-select]')
+        .map((s) => (s.element as HTMLSelectElement).value)
+      expect(engines).toEqual(['force', 'elk-layered'])
+    })
+
+    it('starts the comparison with the toolbar (ELK layered, or force if the engine is ELK) and stops it', async () => {
+      const wrapper = await mountView('/nw/ss')
+      await wrapper.get('[data-testid=compare]').setValue(true)
+      await flushPromises()
+      expect(router.currentRoute.value.query.compare).toBe('elk-layered')
+      expect(svgCount(wrapper)).toBe(2)
+      await wrapper.get('[data-testid=compare]').setValue(false)
+      await flushPromises()
+      expect(router.currentRoute.value.query.compare).toBeUndefined()
+      expect(svgCount(wrapper)).toBe(1)
+    })
+
+    it('compares with force when the engine of the view is ELK', async () => {
+      const wrapper = await mountView('/nw/ss?layout=elk-force')
+      await wrapper.get('[data-testid=compare]').setValue(true)
+      await flushPromises()
+      expect(router.currentRoute.value.query.compare).toBe('force')
+    })
+
+    it('puts the changed engine into the URL (the default engine is not put)', async () => {
+      const wrapper = await mountView('/nw/ss')
+      await wrapper.get('[data-testid=layout-select]').setValue('elk-layered')
+      await flushPromises()
+      expect(router.currentRoute.value.query.layout).toBe('elk-layered')
+      await wrapper.get('[data-testid=layout-select]').setValue('force')
+      await flushPromises()
+      expect(router.currentRoute.value.query.layout).toBeUndefined()
+    })
+
+    it('shares the selection between the two views', async () => {
+      mocked.getSupports.mockResolvedValue(supportsData)
+      mocked.getAttributes.mockResolvedValue(attributesData)
+      const wrapper = await mountView('/nw/ss?layers=layer1,layer2&compare=force&sel=layer2%2Fr1')
+      const selected = wrapper.findAll('g.node.selected[data-id="layer2/r1"]')
+      expect(selected).toHaveLength(2)
+    })
+  })
+
   it('shows the error if the snapshot can not be loaded', async () => {
     mocked.getSummary.mockRejectedValue(new Error('Not found: x'))
     const wrapper = await mountView()

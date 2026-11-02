@@ -5,9 +5,11 @@ import AttributePanel from '../components/AttributePanel.vue'
 import ForceView from '../components/ForceView.vue'
 import LayerList from '../components/LayerList.vue'
 import SummaryBar from '../components/SummaryBar.vue'
+import ViewToolbar from '../components/ViewToolbar.vue'
 import { usePolling } from '../composables/usePolling'
 import { useSelect } from '../composables/useSelect'
 import { defaultVisibleLayers } from '../domain/layers'
+import { DEFAULT_LAYOUT_ENGINE, parseLayoutEngine, type LayoutEngine } from '../render/layout/types'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 
@@ -80,6 +82,24 @@ async function reload(): Promise<void> {
 }
 usePolling(reload, RELOAD_INTERVAL_MS)
 
+/**
+ * Layout engines are kept in the URL (`?layout=<engine>&compare=<engine>`) to compare them:
+ * `layout` is the engine of the (left) view and `compare` is the engine of the other view (shown side by side).
+ */
+const engineA = computed<LayoutEngine>(() => parseLayoutEngine(route.query.layout) ?? DEFAULT_LAYOUT_ENGINE)
+const engineB = computed<LayoutEngine | null>(() => parseLayoutEngine(route.query.compare) ?? null)
+
+function setEngineQuery(key: 'layout' | 'compare', engine: LayoutEngine | null): void {
+  const query = { ...route.query }
+  if (engine === null || (key === 'layout' && engine === DEFAULT_LAYOUT_ENGINE)) delete query[key]
+  else query[key] = engine
+  void router.replace({ query })
+}
+/** Compare with another engine: ELK layered (if the engine of the view is ELK, force) */
+function setCompare(on: boolean): void {
+  setEngineQuery('compare', on ? (engineA.value === 'force' ? 'elk-layered' : 'force') : null)
+}
+
 function toggleLayer(layerId: string): void {
   const current = visibleLayers.value
   const next = current.includes(layerId) ? current.filter((id) => id !== layerId) : [...current, layerId]
@@ -102,7 +122,24 @@ onBeforeUnmount(() => selection.select(null))
         <LayerList :layers="topology.summary.layers" :visible="visibleLayers" @toggle="toggleLayer" />
       </aside>
       <section class="viewer" data-testid="viewer">
-        <ForceView :visible-layers="visibleLayers" />
+        <ViewToolbar
+          :visible-layers="visibleLayers"
+          :compare="engineB !== null"
+          @update:compare="setCompare"
+        />
+        <div class="panels" :class="{ compare: engineB !== null }">
+          <ForceView
+            :visible-layers="visibleLayers"
+            :engine="engineA"
+            @update:engine="(engine) => setEngineQuery('layout', engine)"
+          />
+          <ForceView
+            v-if="engineB"
+            :visible-layers="visibleLayers"
+            :engine="engineB"
+            @update:engine="(engine) => setEngineQuery('compare', engine)"
+          />
+        </div>
       </section>
       <AttributePanel />
     </div>
@@ -115,6 +152,14 @@ onBeforeUnmount(() => selection.select(null))
   grid-template-columns: 16rem minmax(0, 1fr) 24rem;
   gap: 1rem;
   margin-top: 0.5rem;
+}
+.panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+.panels.compare {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .error {
   color: #c62828;

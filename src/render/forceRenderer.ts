@@ -15,6 +15,18 @@ import { zoom, zoomIdentity, type ZoomBehavior } from 'd3-zoom'
 import type { DisplayGraph, DisplayLink, DisplayNode } from '../domain/graph'
 import { countCrossings, overlapDepth, type Segment } from '../domain/layoutScore'
 import { radiusForPorts, spreadAngles } from '../domain/ports'
+import { layoutWithElk } from './layout/elkLayout'
+import { packBoxes } from './layout/pack'
+import { layoutQuality } from './layout/quality'
+import {
+  DEFAULT_LAYOUT_ENGINE,
+  elkAlgorithmOf,
+  type ElkAlgorithm,
+  type ElkLayoutFn,
+  type LayoutEngine,
+  type LayoutStats,
+  type Position,
+} from './layout/types'
 
 /** Colors of layers (color-blind friendly palette) */
 export const LAYER_COLORS = [
@@ -37,6 +49,11 @@ export function layerColor(layer: string, layerOrder: readonly string[]): string
   return LAYER_COLORS[index % LAYER_COLORS.length] ?? '#999999'
 }
 
+/** Key of a pair of nodes (the direction is ignored) */
+function pairKey(a: string, b: string): string {
+  return a < b ? `${a}\n${b}` : `${b}\n${a}`
+}
+
 const NODE_RADIUS = 11
 const PORT_RADIUS = 4.5
 /** Length of the arc of a node circle reserved for a port */
@@ -54,7 +71,13 @@ const WARMUP_TICKS = 300
 const CROSSING_WEIGHT = 100
 const OVERLAP_WEIGHT = 10
 /** The layout is tried with several random starts only for graphs not larger than this */
+/** Gap between the layouts of layers (ELK engines) */
+const LAYER_GAP = 120
 const MULTISTART_MAX_NODES = 400
+/** Time to try more random starts when no layout without crossings is found */
+const MULTISTART_BUDGET_MS = 500
+/** The least upper limit of the number of the random starts (small graphs are made many times quickly) */
+const MULTISTART_MAX_TRIES = 12
 /** Number of the random starts of the layout */
 const DEFAULT_MULTISTART = 6
 
@@ -75,6 +98,12 @@ export interface RendererCallbacks {
 export interface RendererOptions {
   /** Number of the random starts of the layout (the best layout is used). 1 to disable. */
   multiStart?: number
+  /** Layout engine (default: force) */
+  engine?: LayoutEngine
+  /** Function to arrange with ELK (default: ELK is loaded when it is used) */
+  elkLayout?: ElkLayoutFn
+  /** Called with null when a layout is started (ELK is asynchronous) and with the result when it is done */
+  onLayout?: (stats: LayoutStats | null) => void
 }
 
 /** IDs are IDs of shown elements (see displayIdOf) */
@@ -105,6 +134,21 @@ export class ForceRenderer {
   private readonly simulation: Simulation<Item, SimLink>
   private readonly zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>
   private readonly multiStart: number
+  private engine: LayoutEngine
+  private readonly elkLayout: ElkLayoutFn
+  private readonly onLayout: (stats: LayoutStats | null) => void
+  private graph: DisplayGraph = { nodes: [], links: [] }
+  /** To ignore the result of an old (asynchronous) layout */
+  private layoutToken = 0
+  /** Nodes and links of the layout of ELK which is shown (not to arrange the same graph again) */
+  private appliedSignature = ''
+  private lastStats: LayoutStats | null = null
+  /** Time when the last layout was started (the quality of an animated layout is told when it is settled) */
+  private layoutStarted: number | null = null
+  /** Bend points of the links between nodes (by the pair of the nodes), from `from` to the other node. Made by ELK. */
+  private routes = new Map<string, { from: string; points: Position[] }>()
+  /** Routes of the layout of ELK which is shown (kept for the same graph) */
+  private appliedRoutes = new Map<string, { from: string; points: Position[] }>()
   private bodies: Item[] = []
   private ports: Item[] = []
   private simLinks: SimLink[] = []
@@ -129,6 +173,9 @@ export class ForceRenderer {
     options: RendererOptions = {},
   ) {
     this.multiStart = options.multiStart ?? DEFAULT_MULTISTART
+    this.engine = options.engine ?? DEFAULT_LAYOUT_ENGINE
+    this.elkLayout = options.elkLayout ?? layoutWithElk
+    this.onLayout = options.onLayout ?? (() => undefined)
     const svgSelection = select(svg)
     this.root = svgSelection.append('g').attr('class', 'viewport')
     this.linkLayer = this.root.append('g').attr('class', 'links')
@@ -169,6 +216,8 @@ export class ForceRenderer {
       .on('tick', () => this.onTick())
       .on('end', () => {
         if (!this.userMoved) this.fit()
+        // the layout of an incremental change is settled: tell its quality (the time is from the start of the layout)
+        if (this.engine === 'force' && this.layoutStarted !== null) this.reportLayout(this.layoutStarted)
       })
   }
 
@@ -189,12 +238,29 @@ export class ForceRenderer {
     this.simulation.nodes(this.bodies)
     this.simulation.force<ReturnType<typeof forceLink<Item, SimLink>>>('link')?.links(this.simLinks)
     this.ticks = 0
-    this.layout()
+    this.graph = graph
+    this.runLayout()
     this.renderElements()
     this.placePorts()
     this.applyHighlight()
     this.applyHover()
     this.draw()
+  }
+
+  /** Change the layout engine: all the nodes are arranged again */
+  setEngine(engine: LayoutEngine): void {
+    if (engine === this.engine) return
+    this.engine = engine
+    this.relayout()
+  }
+
+  /** Arrange all the nodes again from scratch (the known positions are forgotten) */
+  relayout(): void {
+    this.positions.clear()
+    this.bodies = []
+    this.appliedSignature = ''
+    this.userMoved = false
+    this.setGraph(this.graph, this.layerOrder)
   }
 
   setHighlight(highlight: Highlight): void {
@@ -301,6 +367,138 @@ export class ForceRenderer {
 
   // --- layout
 
+  /** Arrange the nodes by the engine */
+  private runLayout(): void {
+    const token = ++this.layoutToken
+    const started = performance.now()
+    this.layoutStarted = started
+    this.routes = new Map()
+    const algorithm = elkAlgorithmOf(this.engine)
+    if (!algorithm) {
+      this.layout()
+      this.reportLayout(started)
+      return
+    }
+
+    // ELK arranges asynchronously. The nodes are shown at the known positions (or near their areas) until then.
+    this.simulation.stop()
+    const fresh = this.bodies.filter((body) => !this.positions.has(body.id))
+    for (const body of this.bodies) {
+      const known = this.positions.get(body.id)
+      if (known) Object.assign(body, { x: known.x, y: known.y, vx: 0, vy: 0 })
+    }
+    this.scatter(fresh)
+    const signature = this.layoutSignature()
+    if (signature === this.appliedSignature) {
+      this.routes = this.appliedRoutes
+      this.onLayout(this.lastStats)
+      return
+    }
+    this.onLayout(null)
+    void this.layoutElk(algorithm, token, started, signature)
+  }
+
+  private layoutSignature(): string {
+    const nodes = this.bodies.map((body) => `${body.id}:${body.radius.toFixed(1)}`).join(',')
+    const links = this.simLinks.map(
+      (link) => `${this.itemOf(link.source)?.id}>${this.itemOf(link.target)?.id}`,
+    )
+    return `${this.engine}|${nodes}|${links.join(',')}`
+  }
+
+  /** Arrange the nodes of each layer with ELK and put the layouts of the layers in a grid */
+  private async layoutElk(
+    algorithm: ElkAlgorithm,
+    token: number,
+    started: number,
+    signature: string,
+  ): Promise<void> {
+    const byLayer = new Map<string, Item[]>()
+    for (const body of this.bodies) byLayer.set(body.layer, [...(byLayer.get(body.layer) ?? []), body])
+    const layers = [...byLayer].sort(
+      ([a], [b]) => (this.areaIndex.get(a) ?? 0) - (this.areaIndex.get(b) ?? 0),
+    )
+    const results = await Promise.all(
+      layers.map(async ([layer, items]) => {
+        const ids = new Set(items.map((item) => item.id))
+        const links = this.simLinks.flatMap((link) => {
+          const [source, target] = [this.itemOf(link.source)?.id, this.itemOf(link.target)?.id]
+          return source && target && ids.has(source) && ids.has(target) ? [{ source, target }] : []
+        })
+        const { positions, routes } = await this.elkLayout(
+          algorithm,
+          items.map((item) => ({ id: item.id, radius: item.radius })),
+          links,
+        )
+        return { layer, items, positions, routes, links }
+      }),
+    )
+    if (token !== this.layoutToken) return // a newer layout has been started
+
+    const extents = results.map(({ layer, items, positions }) => {
+      const xs = items.map((item) => (positions.get(item.id)?.x ?? 0) - item.radius)
+      const ys = items.map((item) => (positions.get(item.id)?.y ?? 0) - item.radius)
+      const xe = items.map((item) => (positions.get(item.id)?.x ?? 0) + item.radius)
+      const ye = items.map((item) => (positions.get(item.id)?.y ?? 0) + item.radius)
+      const [minX, minY] = [Math.min(...xs), Math.min(...ys)]
+      return { key: layer, width: Math.max(...xe) - minX, height: Math.max(...ye) - minY, minX, minY }
+    })
+    const offsets = packBoxes(extents, LAYER_GAP)
+    const routes = new Map<string, { from: string; points: Position[] }>()
+    for (const { layer, items, positions, routes: layerRoutes, links } of results) {
+      const [offset, extent] = [offsets.get(layer), extents.find((e) => e.key === layer)]
+      for (const item of items) {
+        const p = positions.get(item.id)
+        if (!p || !offset || !extent) continue
+        Object.assign(item, {
+          x: offset.x + p.x - extent.minX,
+          y: offset.y + p.y - extent.minY,
+          vx: 0,
+          vy: 0,
+        })
+      }
+      // the bend points of the links are moved in the same way as the nodes
+      for (const [index, bends] of layerRoutes) {
+        const link = links[index]
+        if (!link || !offset || !extent) continue
+        const points = bends.map((b) => ({
+          x: offset.x + b.x - extent.minX,
+          y: offset.y + b.y - extent.minY,
+        }))
+        routes.set(pairKey(link.source, link.target), { from: link.source, points })
+      }
+    }
+    this.routes = routes
+    this.appliedRoutes = routes
+    this.appliedSignature = signature
+    this.placePorts()
+    this.draw()
+    if (!this.userMoved) this.fit()
+    this.reportLayout(started)
+  }
+
+  /** Tell the quality of the layout (to compare the engines) */
+  private reportLayout(started: number): void {
+    const nodes = this.bodies.map((body) => ({
+      id: body.id,
+      x: body.x ?? 0,
+      y: body.y ?? 0,
+      radius: body.radius,
+    }))
+    const links = this.simLinks.map((link) => {
+      const [source, target] = [this.itemOf(link.source)?.id ?? '', this.itemOf(link.target)?.id ?? '']
+      return { source, target, via: this.routeOf(source, target) }
+    })
+    this.lastStats = {
+      engine: this.engine,
+      ms: Math.round(performance.now() - started),
+      nodes: nodes.length,
+      links: links.length,
+      ...layoutQuality(nodes, links),
+    }
+    this.onLayout(this.lastStats)
+  }
+
   /** Give the positions of the nodes: known ones are kept, the new ones are placed by the simulation */
   private layout(): void {
     const fresh = this.bodies.filter((body) => !this.positions.has(body.id))
@@ -319,9 +517,15 @@ export class ForceRenderer {
       return
     }
 
-    const tries = this.bodies.length <= MULTISTART_MAX_NODES ? Math.max(1, this.multiStart) : 1
+    // A force layout often ends up in a twisted state (links crossing each other), so it is made from several
+    // random starts. It stops at the first one without crossings and overlaps; if there is none, it goes on
+    // (up to 3 times of the number of the starts, at least 12) while the time is within the budget.
+    const minTries = this.bodies.length <= MULTISTART_MAX_NODES ? Math.max(1, this.multiStart) : 1
+    const begin = performance.now()
     let best: { score: number; positions: Array<[number, number]> } | null = null
-    for (let k = 0; k < tries; k++) {
+    for (let k = 0; k < Math.max(minTries * 3, MULTISTART_MAX_TRIES); k++) {
+      if (k >= minTries && (best?.score === 0 || performance.now() - begin > MULTISTART_BUDGET_MS)) break
+      if (k > 0 && best?.score === 0) break
       this.scatter(this.bodies)
       this.simulation.alpha(1)
       for (let i = 0; i < WARMUP_TICKS; i++) this.simulation.tick()
@@ -361,6 +565,13 @@ export class ForceRenderer {
     })
     const circles = this.bodies.map((b) => ({ x: b.x ?? 0, y: b.y ?? 0, r: b.radius + NODE_MARGIN / 2 }))
     return countCrossings(segments) * CROSSING_WEIGHT + overlapDepth(circles) * OVERLAP_WEIGHT
+  }
+
+  /** Bend points of the link from node `source` to node `target` (empty if it is drawn straight) */
+  private routeOf(source: string, target: string): Position[] {
+    const route = this.routes.get(pairKey(source, target))
+    if (!route) return []
+    return route.from === source ? route.points : [...route.points].reverse()
   }
 
   private itemOf(end: string | Item): Item | undefined {
@@ -416,9 +627,9 @@ export class ForceRenderer {
 
   private renderElements(): void {
     this.linkLayer
-      .selectAll<SVGLineElement, DisplayLink>('line')
+      .selectAll<SVGPathElement, DisplayLink>('path')
       .data(this.drawLinks, (d) => d.id)
-      .join('line')
+      .join('path')
       .attr('class', (d) => `link${d.diff ? ` diff-${d.diff}` : ''}`)
       .attr('stroke-width', (d) => 1 + Math.min(3, Math.log2(d.count)))
 
@@ -459,16 +670,29 @@ export class ForceRenderer {
       .call(
         drag<SVGGElement, Item>()
           .on('start', (event, d) => {
+            if (this.engine !== 'force') return
             if (!event.active) this.simulation.alphaTarget(0.3).restart()
             d.fx = d.x
             d.fy = d.y
           })
           .on('drag', (event, d) => {
-            d.fx = event.x
-            d.fy = event.y
             this.userMoved = true
+            if (this.engine === 'force') {
+              d.fx = event.x
+              d.fy = event.y
+              return
+            }
+            // the layouts of the other engines are static: only the node is moved
+            // (the bend points of its links are not valid any more: they are drawn straight)
+            for (const key of [...this.routes.keys()])
+              if (key.split('\n').includes(d.id)) this.routes.delete(key)
+            d.x = event.x
+            d.y = event.y
+            this.placePorts()
+            this.draw()
           })
           .on('end', (event, d) => {
+            if (this.engine !== 'force') return
             if (!event.active) this.simulation.alphaTarget(0)
             d.fx = null
             d.fy = null
@@ -491,7 +715,7 @@ export class ForceRenderer {
       .classed('selected', (d) => d.id === selectedId)
       .classed('traced', (d) => d.id !== selectedId && tracedIds.has(d.id))
       .classed('dim', (d) => active && d.id !== selectedId && !tracedIds.has(d.id))
-    this.linkLayer.selectAll<SVGLineElement, DisplayLink>('line').classed('dim', active)
+    this.linkLayer.selectAll<SVGPathElement, DisplayLink>('path').classed('dim', active)
   }
 
   /** Show the element under the pointer (a node, a term-point or its label) and the links of it */
@@ -506,7 +730,7 @@ export class ForceRenderer {
     // the links of a node include the links of its term-points
     const touches = (end: string) => id !== null && (end === id || this.itemById.get(end)?.parent === id)
     this.linkLayer
-      .selectAll<SVGLineElement, DisplayLink>('line')
+      .selectAll<SVGPathElement, DisplayLink>('path')
       .classed('hover', (d) => touches(d.source) || touches(d.target))
   }
 
@@ -518,15 +742,19 @@ export class ForceRenderer {
     if (!this.userMoved && this.ticks % FIT_INTERVAL_TICKS === 0) this.fit()
   }
 
+  /** Path of a link: a straight line, or a polyline through the bend points (made by ELK) */
+  private pathOf(link: DisplayLink): string {
+    const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
+    const [sourceNode, targetNode] = [from?.parent ?? link.source, to?.parent ?? link.target]
+    const bends = this.routeOf(sourceNode, targetNode)
+    const points = [{ x: from?.x ?? 0, y: from?.y ?? 0 }, ...bends, { x: to?.x ?? 0, y: to?.y ?? 0 }]
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+  }
+
   /** Draw the current positions */
   draw(): void {
     const at = (id: string) => this.itemById.get(id)
-    this.linkLayer
-      .selectAll<SVGLineElement, DisplayLink>('line')
-      .attr('x1', (d) => at(d.source)?.x ?? 0)
-      .attr('y1', (d) => at(d.source)?.y ?? 0)
-      .attr('x2', (d) => at(d.target)?.x ?? 0)
-      .attr('y2', (d) => at(d.target)?.y ?? 0)
+    this.linkLayer.selectAll<SVGPathElement, DisplayLink>('path').attr('d', (d) => this.pathOf(d))
     const nodes = this.nodeLayer.selectAll<SVGGElement, Item>('g.node')
     nodes.attr('transform', (d) => `translate(${d.x ?? 0},${d.y ?? 0})`)
     // the name of a port is put outside of the circle of its node

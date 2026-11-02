@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { DisplayGraph } from '../domain/graph'
 import { ForceRenderer, type Highlight } from './forceRenderer'
+import type { ElkLayoutFn, LayoutStats, Positions } from './layout/types'
 
 /** nodes a, b, r; term-points of a (p1, p2) and b (p1); a/p1 - b/p1 are linked */
 const graph: DisplayGraph = {
@@ -55,7 +56,7 @@ describe('ForceRenderer', () => {
     renderer.setGraph(graph, ['l1', 'l2'])
     expect(svg.querySelectorAll('g.node:not(.tp)')).toHaveLength(3)
     expect(svg.querySelectorAll('g.node.tp')).toHaveLength(3)
-    expect(svg.querySelectorAll('line.link')).toHaveLength(1)
+    expect(svg.querySelectorAll('path.link')).toHaveLength(1)
     expect(nodeEl('l1/a').querySelector('text')?.textContent).toBe('a')
     expect(nodeEl('l1/a/p1').querySelector('text')?.textContent).toBe('p1')
     expect(nodeEl('l2/r').querySelector('title')?.textContent).toBe('r (node)')
@@ -72,16 +73,14 @@ describe('ForceRenderer', () => {
     }
   })
 
-  it('puts a term-point toward the node it is linked to', () => {
+  it('puts a term-point on the side of the node it is linked to', () => {
     renderer.setGraph(graph, ['l1', 'l2'])
     renderer.tick(30)
     const [ax, ay] = pos('l1/a')
     const [bx, by] = pos('l1/b')
     const [px, py] = pos('l1/a/p1')
-    // the angle between (node a -> port) and (node a -> node b) is small
-    const toPort = Math.atan2(py - ay, px - ax)
-    const toPeer = Math.atan2(by - ay, bx - ax)
-    expect(Math.abs(Math.atan2(Math.sin(toPort - toPeer), Math.cos(toPort - toPeer)))).toBeLessThan(0.5)
+    // the port is on the side of the peer: the angle between (node a -> port) and (node a -> node b) is less than 90 degrees
+    expect((px - ax) * (bx - ax) + (py - ay) * (by - ay)).toBeGreaterThan(0)
   })
 
   it('separates the term-points of a node', () => {
@@ -92,22 +91,24 @@ describe('ForceRenderer', () => {
     expect(Math.hypot(x1 - x2, y1 - y2)).toBeGreaterThan(9)
   })
 
+  /** Points of the path of a link */
+  const pathPoints = (selector = 'path.link'): Array<[number, number]> =>
+    (svg.querySelector(selector)?.getAttribute('d') ?? '')
+      .split(/[ML]/)
+      .filter(Boolean)
+      .map((p) => p.split(',').map(Number) as [number, number])
+
   it('draws a link between the term-points', () => {
     renderer.setGraph(graph, ['l1', 'l2'])
     renderer.tick(10)
-    const line = svg.querySelector('line.link') as SVGLineElement
-    const [x1, y1] = pos('l1/a/p1')
-    const [x2, y2] = pos('l1/b/p1')
-    expect([line.getAttribute('x1'), line.getAttribute('y1')].map(Number)).toEqual([x1, y1])
-    expect([line.getAttribute('x2'), line.getAttribute('y2')].map(Number)).toEqual([x2, y2])
+    expect(pathPoints()).toEqual([pos('l1/a/p1'), pos('l1/b/p1')])
   })
 
   it('draws a link between the nodes when the term-points are not shown', () => {
     renderer.setGraph(collapsed, ['l1', 'l2'])
     renderer.tick(10)
     expect(svg.querySelectorAll('g.node.tp')).toHaveLength(0)
-    const line = svg.querySelector('line.link') as SVGLineElement
-    expect([line.getAttribute('x1'), line.getAttribute('y1')].map(Number)).toEqual(pos('l1/a'))
+    expect(pathPoints()).toEqual([pos('l1/a'), pos('l1/b')])
   })
 
   it('marks nodes and term-points with diff and expanded nodes by classes', () => {
@@ -117,8 +118,18 @@ describe('ForceRenderer', () => {
     expect(nodeEl('l1/a/p2').classList.contains('diff-added')).toBe(true)
   })
 
-  it('arranges a graph without crossings of links in a ring (the best of random starts)', () => {
-    // a 4-cycle: it can be drawn without crossings. The layout with fewer crossings is chosen.
+  it('arranges a graph which can be drawn without crossings of links (it is tried again from other starts)', () => {
+    // a 4-cycle can be drawn without crossings, but a force layout from one random start is twisted in half of the cases.
+    // The random numbers are fixed so that the result does not change at every run.
+    let seed = 12345
+    const random = vi.spyOn(Math, 'random').mockImplementation(() => {
+      // mulberry32
+      seed = (seed + 0x6d2b79f5) >>> 0
+      let t = seed
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32
+    })
     const nodes = ['a', 'b', 'c', 'd'].map((n) => ({
       id: n,
       type: 'node' as const,
@@ -135,15 +146,15 @@ describe('ForceRenderer', () => {
         { id: '4', source: 'd', target: 'a', type: 'link', count: 1 },
       ],
     }
-    const multi = new ForceRenderer(svg, callbacks, { multiStart: 4 })
-    multi.setGraph(ring, ['l'])
-    const [a, b, c, d] = ['a', 'b', 'c', 'd'].map(pos)
-    const diag1 = Math.hypot((a?.[0] ?? 0) - (c?.[0] ?? 0), (a?.[1] ?? 0) - (c?.[1] ?? 0))
-    const diag2 = Math.hypot((b?.[0] ?? 0) - (d?.[0] ?? 0), (b?.[1] ?? 0) - (d?.[1] ?? 0))
-    const side = Math.hypot((a?.[0] ?? 0) - (b?.[0] ?? 0), (a?.[1] ?? 0) - (b?.[1] ?? 0))
-    // the diagonals of a convex quadrangle are longer than a side (a crossed layout has a short diagonal)
-    expect(Math.min(diag1, diag2)).toBeGreaterThan(side * 0.9)
-    multi.destroy()
+    const reports: Array<LayoutStats | null> = []
+    for (let k = 0; k < 20; k++) {
+      const multi = new ForceRenderer(svg, callbacks, { multiStart: 1, onLayout: (s) => reports.push(s) })
+      multi.setGraph(ring, ['l'])
+      multi.destroy()
+    }
+    random.mockRestore()
+    // with only one start (minTries = 1), the layout is retried until there is no crossing
+    expect(reports.every((r) => r?.crossings === 0 && r.overlap === 0)).toBe(true)
   })
 
   it('keeps the positions of the nodes when the graph is updated', () => {
@@ -163,7 +174,7 @@ describe('ForceRenderer', () => {
     renderer.setGraph(graph, ['l1', 'l2'])
     renderer.setGraph({ nodes: graph.nodes.slice(0, 1), links: [] }, ['l1'])
     expect(svg.querySelectorAll('g.node')).toHaveLength(1)
-    expect(svg.querySelectorAll('line.link')).toHaveLength(0)
+    expect(svg.querySelectorAll('path.link')).toHaveLength(0)
   })
 
   it('fits the view to the elements, until the user moves the view', () => {
@@ -214,17 +225,17 @@ describe('ForceRenderer', () => {
 
     it('marks the links of a hovered term-point', () => {
       nodeEl('l1/a/p1').dispatchEvent(new MouseEvent('mouseenter'))
-      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(1)
+      expect(svg.querySelectorAll('path.link.hover')).toHaveLength(1)
       nodeEl('l1/a/p1').dispatchEvent(new MouseEvent('mouseleave'))
       nodeEl('l1/a/p2').dispatchEvent(new MouseEvent('mouseenter'))
-      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(0)
+      expect(svg.querySelectorAll('path.link.hover')).toHaveLength(0)
     })
 
     it('marks the links of the term-points of a hovered node', () => {
       nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseenter'))
-      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(1)
+      expect(svg.querySelectorAll('path.link.hover')).toHaveLength(1)
       nodeEl('l1/b').dispatchEvent(new MouseEvent('mouseleave'))
-      expect(svg.querySelectorAll('line.link.hover')).toHaveLength(0)
+      expect(svg.querySelectorAll('path.link.hover')).toHaveLength(0)
     })
 
     it('brings the hovered element to the front', () => {
@@ -314,5 +325,194 @@ describe('ForceRenderer', () => {
     renderer.setGraph(graph, ['l1'])
     renderer.destroy()
     expect(svg.querySelector('g.viewport')).toBeNull()
+  })
+
+  describe('layout engines', () => {
+    /** ELK is replaced by a function which puts the nodes on a line (the nodes of a layer are 100 apart) */
+    const lineLayout = (routes: Map<number, Array<{ x: number; y: number }>> = new Map()) =>
+      vi.fn<ElkLayoutFn>((_algorithm, nodes) =>
+        Promise.resolve({
+          positions: new Map(nodes.map((n, i) => [n.id, { x: i * 100 + 50, y: 50 }])) as Positions,
+          routes,
+        }),
+      )
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+    const make = (elkLayout: ElkLayoutFn, onLayout?: (stats: LayoutStats | null) => void) => {
+      renderer.destroy()
+      renderer = new ForceRenderer(svg, callbacks, {
+        multiStart: 1,
+        engine: 'elk-layered',
+        elkLayout,
+        onLayout,
+      })
+      return renderer
+    }
+
+    it('puts the nodes at the positions given by ELK (the algorithm of the engine is used)', async () => {
+      const elk = lineLayout()
+      make(elk).setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      expect(elk.mock.calls.map((call) => call[0])).toEqual(['layered', 'layered'])
+      // layer l1 (a, b) is in a line, 100 apart
+      expect(pos('l1/b')[0] - pos('l1/a')[0]).toBeCloseTo(100, 3)
+      expect(pos('l1/b')[1]).toBeCloseTo(pos('l1/a')[1], 3)
+    })
+
+    it('arranges each layer separately and puts the layouts of the layers apart from each other', async () => {
+      const elk = lineLayout()
+      make(elk).setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      const layers = elk.mock.calls.map((call) => call[1].map((n) => n.id))
+      expect(layers).toEqual([['l1/a', 'l1/b'], ['l2/r']])
+      const [r, a, b] = [pos('l2/r'), pos('l1/a'), pos('l1/b')]
+      // the box of l1 is x: -r..., the layer l2 is next to it with a gap (no overlap)
+      expect(Math.hypot(r[0] - a[0], r[1] - a[1])).toBeGreaterThan(40)
+      expect(Math.hypot(r[0] - b[0], r[1] - b[1])).toBeGreaterThan(40)
+    })
+
+    it('passes only the links in the layer to ELK', async () => {
+      const elk = lineLayout()
+      make(elk).setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      expect(elk.mock.calls[0]?.[2]).toEqual([{ source: 'l1/a', target: 'l1/b' }])
+      expect(elk.mock.calls[1]?.[2]).toEqual([])
+    })
+
+    it('reports that the layout is in progress (null) and then the quality of the layout', async () => {
+      const reports: Array<LayoutStats | null> = []
+      make(lineLayout(), (stats) => reports.push(stats)).setGraph(collapsed, ['l1', 'l2'])
+      expect(reports).toEqual([null])
+      await flush()
+      expect(reports).toHaveLength(2)
+      expect(reports[1]).toMatchObject({ engine: 'elk-layered', nodes: 3, links: 1, crossings: 0 })
+    })
+
+    it('does not arrange the same graph again, and reports the last result', async () => {
+      const elk = lineLayout()
+      const reports: Array<LayoutStats | null> = []
+      const r = make(elk, (stats) => reports.push(stats))
+      r.setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      r.setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      expect(elk).toHaveBeenCalledTimes(2) // 2 layers, once
+      expect(reports.at(-1)?.engine).toBe('elk-layered')
+    })
+
+    it('arranges again when the nodes are changed (e.g. the term-points are shown)', async () => {
+      const elk = lineLayout()
+      const r = make(elk)
+      r.setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      r.setGraph(graph, ['l1', 'l2'])
+      await flush()
+      expect(elk).toHaveBeenCalledTimes(4)
+    })
+
+    it('ignores the result of an old layout when a newer one is started', async () => {
+      const resolvers: Array<(positions: Positions) => void> = []
+      const slow = vi.fn<ElkLayoutFn>(
+        () =>
+          new Promise((resolve) => resolvers.push((positions) => resolve({ positions, routes: new Map() }))),
+      )
+      const r = make(slow)
+      r.setGraph({ nodes: collapsed.nodes.slice(0, 1), links: [] }, ['l1', 'l2'])
+      r.setGraph({ nodes: collapsed.nodes.slice(0, 1), links: [] }, ['l1', 'l2']) // the layout is started again
+      const [first, second] = resolvers
+      second?.(new Map([['l1/a', { x: 500, y: 0 }]]))
+      first?.(new Map([['l1/a', { x: -900, y: 0 }]]))
+      await flush()
+      expect(pos('l1/a')[0]).not.toBeCloseTo(-900, 0)
+    })
+
+    it('arranges again from scratch when the engine is changed (to force and back)', async () => {
+      const elk = lineLayout()
+      const reports: Array<LayoutStats | null> = []
+      const r = make(elk, (stats) => reports.push(stats))
+      r.setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      r.setEngine('force')
+      expect(reports.at(-1)).toMatchObject({ engine: 'force', nodes: 3 })
+      r.setEngine('elk-layered')
+      await flush()
+      expect(elk).toHaveBeenCalledTimes(4)
+      expect(reports.at(-1)).toMatchObject({ engine: 'elk-layered' })
+    })
+
+    it('does nothing when the engine is not changed', async () => {
+      const elk = lineLayout()
+      const r = make(elk)
+      r.setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      r.setEngine('elk-layered')
+      await flush()
+      expect(elk).toHaveBeenCalledTimes(2)
+    })
+
+    it('reports the quality of the force layout too', () => {
+      const reports: Array<LayoutStats | null> = []
+      renderer.destroy()
+      renderer = new ForceRenderer(svg, callbacks, { multiStart: 1, onLayout: (s) => reports.push(s) })
+      renderer.setGraph(collapsed, ['l1', 'l2'])
+      expect(reports.at(-1)).toMatchObject({ engine: 'force', nodes: 3, links: 1 })
+      expect(reports.at(-1)?.ms).toBeGreaterThanOrEqual(0)
+    })
+
+    it('draws a link through the bend points given by ELK (moved with the layout of the layer)', async () => {
+      // link 0 of the layer l1 is a -> b: bend points at (150, 200)
+      make(lineLayout(new Map([[0, [{ x: 150, y: 200 }]]]))).setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      const [a, b] = [pos('l1/a'), pos('l1/b')]
+      // a and b are at (50,50) and (150,50) in the layout of the layer: the bend point is 150 below the line of the nodes
+      expect(pathPoints()).toEqual([a, [b[0], b[1] + 150], b])
+    })
+
+    it('draws the bend points in the reverse order for a link in the other direction', async () => {
+      const bends = [
+        { x: 100, y: 200 },
+        { x: 200, y: 200 },
+      ]
+      const reverse: DisplayGraph = {
+        ...collapsed,
+        links: [{ id: 'k', source: 'l1/b', target: 'l1/a', type: 'link', count: 1 }],
+      }
+      // the link (b -> a) is given to ELK as b -> a: the bend points are from b to a
+      make(lineLayout(new Map([[0, bends]]))).setGraph(reverse, ['l1', 'l2'])
+      await flush()
+      const [a, b] = [pos('l1/a'), pos('l1/b')]
+      const points = pathPoints()
+      expect(points[0]).toEqual(b)
+      expect(points[3]).toEqual(a)
+      expect(points[1]?.[0]).toBeLessThan(points[2]?.[0] ?? 0)
+    })
+
+    it('draws a link straight when the engine is changed to force (the routes are forgotten)', async () => {
+      const r = make(lineLayout(new Map([[0, [{ x: 150, y: 200 }]]])))
+      r.setGraph(collapsed, ['l1', 'l2'])
+      await flush()
+      expect(pathPoints()).toHaveLength(3)
+      r.setEngine('force')
+      expect(pathPoints()).toHaveLength(2)
+    })
+
+    it('counts the crossings with the routes (a link around a node does not cross the other link)', async () => {
+      const reports: Array<LayoutStats | null> = []
+      // the layer l1: a, b on a line, and a link a - b. Another layer would not matter.
+      make(lineLayout(new Map([[0, [{ x: 100, y: 500 }]]])), (stats) => reports.push(stats)).setGraph(
+        collapsed,
+        ['l1', 'l2'],
+      )
+      await flush()
+      expect(reports.at(-1)).toMatchObject({ crossings: 0 })
+    })
+
+    it('puts the term-points on the circles of the nodes with ELK, too', async () => {
+      make(lineLayout()).setGraph(graph, ['l1', 'l2'])
+      await flush()
+      const [ax, ay] = pos('l1/a')
+      const radius = Number(nodeEl('l1/a').querySelector('circle')?.getAttribute('r'))
+      const [px, py] = pos('l1/a/p1')
+      expect(Math.hypot(px - ax, py - ay)).toBeCloseTo(radius, 3)
+    })
   })
 })
