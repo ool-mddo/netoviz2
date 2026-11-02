@@ -40,6 +40,8 @@ const TP_RADIUS = 5
 const LAYER_SPACING_X = 700
 const LAYER_SPACING_Y = 500
 const FIT_MARGIN = 40
+/** While the layout is moving, fit the view to all elements every this ticks (until the user moves the view) */
+const FIT_INTERVAL_TICKS = 25
 
 type SimNode = SimulationNodeDatum & DisplayNode
 type SimLink = SimulationLinkDatum<SimNode> &
@@ -87,6 +89,7 @@ export class ForceRenderer {
   private areaIndex = new Map<string, number>()
   private highlight: Highlight = NO_HIGHLIGHT
   private userMoved = false
+  private ticks = 0
 
   constructor(
     private readonly svg: SVGSVGElement,
@@ -125,7 +128,7 @@ export class ForceRenderer {
       )
       .force('x', forceX<SimNode>((d) => this.layerCenter(d.layer).x).strength(0.06))
       .force('y', forceY<SimNode>((d) => this.layerCenter(d.layer).y).strength(0.06))
-      .on('tick', () => this.draw())
+      .on('tick', () => this.onTick())
       .on('end', () => {
         if (!this.userMoved) this.fit()
       })
@@ -151,6 +154,7 @@ export class ForceRenderer {
     this.simulation.force<ReturnType<typeof forceLink<SimNode, SimLink>>>('link')?.links(this.links)
     this.renderElements()
     this.applyHighlight()
+    this.ticks = 0
     this.simulation.alpha(0.7).restart()
   }
 
@@ -183,8 +187,10 @@ export class ForceRenderer {
   /** Advance the simulation by `count` ticks synchronously and draw (for tests) */
   tick(count = 1): void {
     this.simulation.stop()
-    this.simulation.tick(count)
-    this.draw()
+    for (let i = 0; i < count; i++) {
+      this.simulation.tick()
+      this.onTick()
+    }
   }
 
   destroy(): void {
@@ -279,6 +285,13 @@ export class ForceRenderer {
       .classed('traced', (d) => d.id !== selectedId && tracedIds.has(d.id))
       .classed('dim', (d) => active && d.id !== selectedId && !tracedIds.has(d.id))
     this.linkLayer.selectAll<SVGLineElement, SimLink>('line').classed('dim', active)
+  }
+
+  /** The view follows the layout until the user moves the view */
+  private onTick(): void {
+    this.ticks++
+    this.draw()
+    if (!this.userMoved && this.ticks % FIT_INTERVAL_TICKS === 0) this.fit()
   }
 
   /** Draw the current positions */

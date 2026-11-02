@@ -126,4 +126,14 @@ describe('ForceView', () => {
     await flushPromises()
     expect(view.expandedNodes.has('layer1/sw1')).toBe(true)
   })
+
+  it('loads the layers of the objects reached through supports when an object is selected', async () => {
+    const { wrapper, topology } = await mountView(['layer2'], ['layer2'])
+    current = wrapper
+    nodeEl(wrapper, 'layer2/r1').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(topology.layerData['layer1']).toBeDefined()
+    // the layer is loaded only for names: it is not drawn (not visible)
+    expect(wrapper.element.querySelectorAll('g.node')).toHaveLength(1)
+  })
 })

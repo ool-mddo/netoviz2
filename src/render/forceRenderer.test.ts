@@ -56,6 +56,15 @@ describe('ForceRenderer', () => {
     expect(nodeEl('l1/b').classList.contains('expanded')).toBe(true)
   })
 
+  it('fits the view to the elements while the layout moves, until the user moves the view', () => {
+    renderer.setGraph(graph, ['l1', 'l2'])
+    expect(svg.querySelector('g.viewport')?.getAttribute('transform')).toBeNull()
+    renderer.tick(25)
+    expect(svg.querySelector('g.viewport')?.getAttribute('transform')).toMatch(
+      /^translate\(.+\) scale\(.+\)$/,
+    )
+  })
+
   it('moves nodes (positions are numbers) and draws the links between them', () => {
     renderer.setGraph(graph, ['l1', 'l2'])
     renderer.tick(10)

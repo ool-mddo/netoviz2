@@ -18,3 +18,12 @@ export function defaultVisibleLayers(layers: readonly LayerInfo[]): string[] {
   if (total <= DEFAULT_ALL_LAYERS_NODE_LIMIT) return top.map((layer) => layer.id)
   return top.slice(0, 1).map((layer) => layer.id)
 }
+
+/**
+ * Layer that an object belongs to. The first segment of the ID of a node/term-point/link is the layer ID
+ * (see the specification of IDs), so the layer is found without parsing the rest of the ID.
+ * @returns undefined if no layer matches
+ */
+export function layerOfId(id: string, layers: readonly Pick<LayerInfo, 'id'>[]): string | undefined {
+  return layers.find((layer) => id === layer.id || id.startsWith(`${layer.id}/`))?.id
+}

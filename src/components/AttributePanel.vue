@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSelect } from '../composables/useSelect'
+import { layerOfId } from '../domain/layers'
 import { traceSupports } from '../domain/tracer'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
@@ -42,7 +43,7 @@ function traced(direction: 'lower' | 'upper'): Array<[string, TraceItem[]]> {
         id,
         name: found?.data.name ?? id,
         type: found?.type ?? '?',
-        layer: found?.layer ?? '(not loaded)',
+        layer: found?.layer ?? layerOfId(id, topology.summary?.layers ?? []) ?? '?',
       }
     })
   const groups = new Map<string, TraceItem[]>()

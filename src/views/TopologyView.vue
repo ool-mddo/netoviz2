@@ -5,6 +5,7 @@ import AttributePanel from '../components/AttributePanel.vue'
 import ForceView from '../components/ForceView.vue'
 import LayerList from '../components/LayerList.vue'
 import SummaryBar from '../components/SummaryBar.vue'
+import { useSelect } from '../composables/useSelect'
 import { defaultVisibleLayers } from '../domain/layers'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
@@ -14,6 +15,7 @@ const route = useRoute()
 const router = useRouter()
 const topology = useTopologyStore()
 const selection = useSelectionStore()
+const selectObject = useSelect()
 
 /** Visible layers are kept in the URL (`?layers=a,b`) so that the view can be shared */
 const visibleLayers = computed<string[]>(() => {
@@ -42,6 +44,28 @@ watch(
     void Promise.all(ids.map((id) => topology.loadLayer(id)))
   },
   { immediate: true },
+)
+
+/** The selected object is kept in the URL (`?sel=<id>`) so that the view can be shared */
+watch(
+  () => [topology.summary, route.query.sel] as const,
+  ([summary, sel]) => {
+    if (!summary) return
+    const id = typeof sel === 'string' ? sel : null
+    if (id !== selection.selectedId) void selectObject(id)
+  },
+  { immediate: true },
+)
+watch(
+  () => selection.selectedId,
+  (id) => {
+    const current = typeof route.query.sel === 'string' ? route.query.sel : null
+    if (id === current) return
+    const query = { ...route.query }
+    if (id) query.sel = id
+    else delete query.sel
+    void router.replace({ query })
+  },
 )
 
 function toggleLayer(layerId: string): void {

@@ -101,4 +101,18 @@ describe('AttributePanel', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid=panel-diff]').text()).toBe('changed')
   })
+
+  it('shows the layer of a traced object which is not loaded (by the first segment of the ID)', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const topology = useTopologyStore()
+    await topology.open('nw', 'ss')
+    await Promise.all([topology.loadLayer('layer2'), topology.ensureSupports()])
+    const wrapper = mount(AttributePanel, { global: { plugins: [pinia] } })
+    useSelectionStore().select('layer2/r1')
+    await flushPromises()
+    const trace = wrapper.get('[data-testid=panel-trace]').text()
+    expect(trace).toContain('layer1')
+    expect(trace).not.toContain('(not loaded)')
+  })
 })

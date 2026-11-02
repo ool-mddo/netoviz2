@@ -3,7 +3,8 @@ import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api/client'
 import { router } from '../router'
-import { layer1Data, layer2Data, makeSummary } from '../test/fixtures'
+import { useSelectionStore } from '../stores/selection'
+import { attributesData, layer1Data, layer2Data, makeSummary, supportsData } from '../test/fixtures'
 import HomeView from './HomeView.vue'
 import TopologyView from './TopologyView.vue'
 
@@ -81,6 +82,27 @@ describe('TopologyView', () => {
     await wrapper.get('[data-testid=toggle-layer2]').trigger('change')
     await flushPromises()
     expect(router.currentRoute.value.query.layers).toBe('layer1')
+  })
+
+  it('selects the object in the URL query (?sel=) and loads its attributes', async () => {
+    mocked.getSupports.mockResolvedValue(supportsData)
+    mocked.getAttributes.mockResolvedValue(attributesData)
+    await mountView('/nw/ss?sel=layer2%2Fr1')
+    expect(useSelectionStore().selectedId).toBe('layer2/r1')
+    expect(mocked.getAttributes).toHaveBeenCalledWith('nw', 'ss', ['layer2/r1'])
+  })
+
+  it('puts the selected object into the URL query and removes it when cleared', async () => {
+    mocked.getSupports.mockResolvedValue(supportsData)
+    mocked.getAttributes.mockResolvedValue(attributesData)
+    await mountView('/nw/ss')
+    const selection = useSelectionStore()
+    selection.select('layer2/r1')
+    await flushPromises()
+    expect(router.currentRoute.value.query.sel).toBe('layer2/r1')
+    selection.select(null)
+    await flushPromises()
+    expect(router.currentRoute.value.query.sel).toBeUndefined()
   })
 
   it('shows the error if the snapshot can not be loaded', async () => {
