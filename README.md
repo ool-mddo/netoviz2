@@ -23,3 +23,27 @@ npm run build        # dist/ (静的ファイル。/netoviz2/ 配下で配信す
 
 - `/netoviz2/` : network / snapshot 一覧
 - `/netoviz2/:network/:snapshot` : トポロジの表示
+
+## 構成
+
+```
+src/
+  api/          netomox-exp の netoviz2 API の型とクライアント (ETag 対応)
+  domain/       Viewer に依存しない純粋なロジック (support 索引・トレース、リンクの束ね、グラフ構築、diff data)
+  stores/       Pinia: topology (summary・レイヤ・supports・属性、ETag による更新)、selection (選択とトレース)、view (展開状態)
+  composables/  選択処理 (useSelect)、ポーリング (usePolling)
+  render/       描画 (ForceRenderer: d3-force + SVG。Vue のリアクティブ機構を通さず DOM を直接更新)
+  components/   ForceView, AttributePanel, JsonTree, LayerList, SummaryBar
+  views/        HomeView (一覧), TopologyView (表示)
+```
+
+## URL のクエリ
+
+`/netoviz2/:network/:snapshot?layers=<id,id>&sel=<object id>` : 表示するレイヤと選択中のオブジェクト (リンクで共有できる)。
+
+## 機能 (MVP)
+
+- force-simulation 表示 (ノード単位。ダブルクリックで term-point を展開)
+- レイヤの表示切替、networks flags / diff / 警告の表示
+- オブジェクトの選択 → support のトレース (上位/下位レイヤ) を強調、右パネルに属性・diff を表示
+- 5 秒ごとに ETag を確認し、トポロジが更新されたら自動で再読込
