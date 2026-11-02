@@ -55,6 +55,7 @@ src/
 ## 機能 (MVP)
 
 - force-simulation 表示 (ノード単位。ダブルクリックで term-point を展開)
+- **レイアウトエンジンの比較**: force (d3-force) と ELK (layered / stress / force) を切り替えられる (`?layout=<engine>`)。「Compare layouts」で 2 つを左右に並べて比較できる (`?compare=<engine>`。選択・ホバー・トレースは共有)。各パネルに所要時間・リンクの交差数・ノードの重なりを表示する。ELK は大きい (約 1.5MB) ため、使うときに初めて読み込む。ELK のライセンスは EPL-2.0 OR GPL-3.0-or-later (採用する前に確認すること)
 - レイヤの表示切替、networks flags / diff / 警告の表示
 - オブジェクトの選択 → support のトレース (上位/下位レイヤ) を強調、右パネルに属性・diff を表示
 - 5 秒ごとに ETag を確認し、トポロジが更新されたら自動で再読込
