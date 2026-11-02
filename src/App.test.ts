@@ -1,8 +1,10 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import { router } from './router'
+
+vi.mock('./api/client', () => ({ getIndex: () => Promise.resolve([]) }))
 
 describe('App', () => {
   it('renders the title and the home view', async () => {

@@ -4,3 +4,17 @@ import type { LayerInfo } from '../api/types'
 export function layersTopDown(layers: readonly LayerInfo[]): LayerInfo[] {
   return [...layers].sort((a, b) => (b.rank ?? -1) - (a.rank ?? -1) || a.id.localeCompare(b.id))
 }
+
+/** If the total number of nodes is over this, only the top layer is shown by default */
+export const DEFAULT_ALL_LAYERS_NODE_LIMIT = 300
+
+/**
+ * Layers to show when the user did not choose.
+ * All layers if the topology is small, otherwise only the top layer (to avoid loading and drawing too much).
+ */
+export function defaultVisibleLayers(layers: readonly LayerInfo[]): string[] {
+  const top = layersTopDown(layers)
+  const total = layers.reduce((sum, layer) => sum + layer.counts.nodes, 0)
+  if (total <= DEFAULT_ALL_LAYERS_NODE_LIMIT) return top.map((layer) => layer.id)
+  return top.slice(0, 1).map((layer) => layer.id)
+}
