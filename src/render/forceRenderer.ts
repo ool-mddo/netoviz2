@@ -41,6 +41,14 @@ export function layerColor(layer: string, layerOrder: readonly string[]): string
   return LAYER_COLORS[index % LAYER_COLORS.length] ?? '#999999'
 }
 
+/**
+ * while a node is dragged in the stress layout, the others follow it through the links but are also
+ * pulled back to where they were (so that the layout changes gently and mostly near the dragged node)
+ */
+const DRAG_ALPHA = 0.1
+const DRAG_ANCHOR_STRENGTH = 0.12
+const DRAG_CHARGE_SCALE = 0.3
+const DRAG_VELOCITY_DECAY = 0.6
 const NODE_RADIUS = 11
 const PORT_RADIUS = 4.5
 /** Length of the arc of a node circle reserved for a port */
@@ -150,6 +158,10 @@ export class ForceRenderer {
   /** Element under the pointer (shown with its links) */
   private hoverId: string | null = null
   private userMoved = false
+  /** Weakens the repulsion while the layout follows a dragged node (stress layout) */
+  private chargeScale = 1
+  /** positions the nodes are pulled back to (only while the layout follows a dragged node) */
+  private anchors: Map<string, { x: number; y: number }> | null = null
   private ticks = 0
 
   constructor(
@@ -189,7 +201,7 @@ export class ForceRenderer {
       )
       .force(
         'charge',
-        forceManyBody<Item>().strength((d) => -(80 + d.radius * 8)),
+        forceManyBody<Item>().strength((d) => -(80 + d.radius * 8) * this.chargeScale),
       )
       .force(
         'collide',
@@ -201,6 +213,7 @@ export class ForceRenderer {
       .force('y', forceY<Item>((d) => this.layerCenter(d.layer).y).strength(0.05))
       .on('tick', () => this.onTick())
       .on('end', () => {
+        this.holdLayout(false)
         if (!this.userMoved) this.fit()
         // the layout of an incremental change is settled: tell its quality (the time is from the start of the layout)
         if (this.engine === 'force' && this.layoutStarted !== null) this.reportLayout(this.layoutStarted)
@@ -653,29 +666,25 @@ export class ForceRenderer {
       .call(
         drag<SVGGElement, Item>()
           .on('start', (event, d) => {
-            if (this.engine !== 'force') return
-            if (!event.active) this.simulation.alphaTarget(0.3).restart()
+            // also in the other engines, the other nodes follow the dragged node (force simulation)
+            this.holdLayout(true)
+            if (!event.active)
+              if (this.engine === 'force') this.simulation.alphaTarget(0.3).restart()
+              // (the simulation of the stress layout is stopped with the alpha of the start: lower it)
+              else this.simulation.alpha(DRAG_ALPHA).alphaTarget(DRAG_ALPHA).restart()
             d.fx = d.x
             d.fy = d.y
           })
           .on('drag', (event, d) => {
             this.userMoved = true
-            if (this.engine === 'force') {
-              d.fx = event.x
-              d.fy = event.y
-              return
-            }
-            // the layout of the other engine is static: only the node is moved
-            d.x = event.x
-            d.y = event.y
-            this.placePorts()
-            this.draw()
+            d.fx = event.x
+            d.fy = event.y
           })
           .on('end', (event, d) => {
-            if (this.engine !== 'force') return
             if (!event.active) this.simulation.alphaTarget(0)
             d.fx = null
             d.fy = null
+            this.anchors?.set(d.id, { x: d.x ?? 0, y: d.y ?? 0 })
           }),
       )
     nodeSelection.select('circle').attr('r', (d) => d.radius)
@@ -685,6 +694,39 @@ export class ForceRenderer {
       .attr('text-anchor', 'middle')
       .attr('dy', (d) => (d.type === 'node' ? d.radius + 12 : 0))
       .text((d) => d.name)
+  }
+
+  /**
+   * (stress layout) while a node is dragged, the simulation pulls the nodes back to their positions
+   * instead of the center of their layers. It is restored when the simulation is settled.
+   */
+  private holdLayout(on: boolean): void {
+    if (this.engine === 'force') return
+    const forceX_ = this.simulation.force<ReturnType<typeof forceX<Item>>>('x')
+    const forceY_ = this.simulation.force<ReturnType<typeof forceY<Item>>>('y')
+    if (on === (this.anchors !== null)) return
+    const link = this.simulation.force<ReturnType<typeof forceLink<Item, SimLink>>>('link')
+    if (on) {
+      const anchors = new Map(this.bodies.map((b) => [b.id, { x: b.x ?? 0, y: b.y ?? 0 }]))
+      this.anchors = anchors
+      // the links keep the distances of the layout (not the distances of the force layout)
+      link?.distance((l) => {
+        const [a, b] = [
+          anchors.get(this.itemOf(l.source)?.id ?? ''),
+          anchors.get(this.itemOf(l.target)?.id ?? ''),
+        ]
+        return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 100
+      })
+      forceX_?.x((d) => anchors.get(d.id)?.x ?? d.x ?? 0).strength(DRAG_ANCHOR_STRENGTH)
+      forceY_?.y((d) => anchors.get(d.id)?.y ?? d.y ?? 0).strength(DRAG_ANCHOR_STRENGTH)
+    } else {
+      this.anchors = null
+      link?.distance((l) => 70 + this.radiusOf(l.source) + this.radiusOf(l.target))
+      forceX_?.x((d) => this.layerCenter(d.layer).x).strength(0.05)
+      forceY_?.y((d) => this.layerCenter(d.layer).y).strength(0.05)
+    }
+    this.chargeScale = on ? DRAG_CHARGE_SCALE : 1
+    this.simulation.velocityDecay(on ? DRAG_VELOCITY_DECAY : 0.4)
   }
 
   private applyHighlight(): void {
