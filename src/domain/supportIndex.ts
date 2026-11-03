@@ -8,7 +8,11 @@ export class SupportIndex {
   private readonly lowerMap = new Map<string, SupportEdge[]>()
   private readonly upperMap = new Map<string, SupportEdge[]>()
 
+  /** All the edges */
+  readonly edges: readonly SupportEdge[]
+
   constructor(edges: readonly SupportEdge[] = []) {
+    this.edges = edges
     for (const edge of edges) {
       this.push(this.lowerMap, edge.from, edge)
       this.push(this.upperMap, edge.to, edge)
