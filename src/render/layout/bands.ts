@@ -3,7 +3,8 @@ import type { Position, Positions } from './types'
 /** A layer of the bands. The layers are given from the top to the bottom */
 export interface BandLayer {
   id: string
-  nodes: ReadonlyArray<{ id: string; name: string }>
+  /** `width` is the width of the node (a group with term-points is wider than a point). Default 0 */
+  nodes: ReadonlyArray<{ id: string; name: string; width?: number }>
 }
 
 /** Support between nodes: `from` (upper) is supported by `to` (lower) */
@@ -13,7 +14,7 @@ export interface BandEdge {
 }
 
 export interface BandOptions {
-  /** Minimum distance between the centers of the nodes in a band */
+  /** Minimum space between the nodes in a band (the distance between the centers of the nodes of width 0) */
   gap: number
   /** Distance between the centers of the bands (vertical) */
   bandSpacing: number
@@ -75,25 +76,29 @@ export function layoutBands(
 
     if (row === 0) {
       // the lowest layer: nothing to align with, in the order of the names
-      const xs = spaceOut(
+      const xs = spaceOutNodes(
         sortedLoose.map((_, i) => i * options.gap),
+        sortedLoose.map((item) => item.node.width ?? 0),
         options.gap,
       )
       sortedLoose.forEach((item, i) => positions.set(item.node.id, { x: xs[i] ?? 0, y }))
       return
     }
 
-    const xs = spaceOut(
+    const xs = spaceOutNodes(
       sortedPlaced.map((item) => item.x),
+      sortedPlaced.map((item) => item.node.width ?? 0),
       options.gap,
     )
     sortedPlaced.forEach((item, i) => positions.set(item.node.id, { x: xs[i] ?? 0, y }))
     // nodes without supporting nodes below: put at the right end for now (see below)
-    let next = xs.length > 0 ? (xs[xs.length - 1] ?? 0) + options.gap * 2 : 0
+    const lastPlaced = sortedPlaced[sortedPlaced.length - 1]
+    let next = lastPlaced ? (xs[xs.length - 1] ?? 0) + (lastPlaced.node.width ?? 0) / 2 + options.gap * 2 : 0
     for (const item of sortedLoose) {
-      positions.set(item.node.id, { x: next, y })
+      const width = item.node.width ?? 0
+      positions.set(item.node.id, { x: next + width / 2, y })
       floating.add(item.node.id)
-      next += options.gap
+      next += width + options.gap
     }
   })
 
@@ -114,17 +119,20 @@ export function layoutBands(
       // the nodes which are still floating (no upper node either) stay at the right end of the band
       .filter((item) => attachedIds.has(item.node.id) || !floating.has(item.node.id))
       .sort((a, b) => a.x - b.x || compareNames(a.node.name, b.node.name))
-    const xs = spaceOut(
+    const xs = spaceOutNodes(
       items.map((item) => item.x),
+      items.map((item) => item.node.width ?? 0),
       options.gap,
     )
     const y = bandY.get(layer.id) ?? 0
     items.forEach((item, i) => positions.set(item.node.id, { x: xs[i] ?? 0, y }))
     // the others (no upper node either) are put at the right end of the band, apart from the others
-    let next = (xs[xs.length - 1] ?? 0) + options.gap * 2
+    const lastItem = items[items.length - 1]
+    let next = (xs[xs.length - 1] ?? 0) + (lastItem?.node.width ?? 0) / 2 + options.gap * 2
     for (const node of layer.nodes.filter((n) => floating.has(n.id) && !attachedIds.has(n.id))) {
-      positions.set(node.id, { x: next, y })
-      next += options.gap
+      const width = node.width ?? 0
+      positions.set(node.id, { x: next + width / 2, y })
+      next += width + options.gap
     }
   }
 
@@ -154,12 +162,33 @@ export function compareNames(a: string, b: string): number {
 
 /**
  * Move the positions (sorted ascending) as little as possible so that neighbors are at least `gap` apart
- * (least squares; the order is kept). Pool-adjacent-violators on the positions with the offset `i * gap` removed.
+ * (least squares; the order is kept).
  */
 export function spaceOut(wanted: readonly number[], gap: number): number[] {
+  return spaceOutWith(
+    wanted,
+    wanted.slice(1).map(() => gap),
+  )
+}
+
+/** `spaceOut` for nodes with widths: the space between the edges of the neighbors is at least `gap` */
+export function spaceOutNodes(wanted: readonly number[], widths: readonly number[], gap: number): number[] {
+  return spaceOutWith(
+    wanted,
+    wanted.slice(1).map((_, i) => ((widths[i] ?? 0) + (widths[i + 1] ?? 0)) / 2 + gap),
+  )
+}
+
+/**
+ * Least squares with the minimum distances between neighbors (`distances[i]` is between i and i + 1).
+ * Pool-adjacent-violators on the positions with the offsets (the sums of the distances) removed.
+ */
+export function spaceOutWith(wanted: readonly number[], distances: readonly number[]): number[] {
+  const offsets: number[] = []
+  wanted.forEach((_, i) => offsets.push(i === 0 ? 0 : (offsets[i - 1] ?? 0) + (distances[i - 1] ?? 0)))
   const blocks: { sum: number; count: number }[] = []
   wanted.forEach((x, i) => {
-    blocks.push({ sum: x - i * gap, count: 1 })
+    blocks.push({ sum: x - (offsets[i] ?? 0), count: 1 })
     // merge while the mean of the previous block is larger than the mean of the last one
     while (blocks.length > 1) {
       const last = blocks[blocks.length - 1]
@@ -170,7 +199,7 @@ export function spaceOut(wanted: readonly number[], gap: number): number[] {
   })
   const result: number[] = []
   for (const block of blocks) {
-    for (let k = 0; k < block.count; k++) result.push(block.sum / block.count + result.length * gap)
+    for (let k = 0; k < block.count; k++) result.push(block.sum / block.count + (offsets[result.length] ?? 0))
   }
   return result
 }

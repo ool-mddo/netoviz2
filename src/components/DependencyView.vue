@@ -7,7 +7,7 @@ import { layerOfId, layersTopDown } from '../domain/layers'
 import { checkSupports, pairKey, type Issue } from '../domain/supportCheck'
 import { traceSupports } from '../domain/tracer'
 import { layerColor } from '../render/forceRenderer'
-import { DEFAULT_BAND_OPTIONS, layoutBands } from '../render/layout/bands'
+import { compareNames, layoutBands } from '../render/layout/bands'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 
@@ -29,11 +29,15 @@ const showList = ref(false)
 let zoomBehavior: ZoomBehavior<SVGSVGElement, unknown> | null = null
 let userMoved = false
 
-const BAND_HEIGHT = 80
+const BAND_HEIGHT = 96
 const NODE_RADIUS = 9
 const TP_RADIUS = 6
 const LABEL_CHAR_WIDTH = 5.5
 const BAND_PADDING = 60
+/** Height of the box of a node with term-points, and the vertical position of the term-points in it (from the band center) */
+const BOX_HEIGHT = 60
+const TP_Y = 8
+const TP_MIN_SLOT = 34
 
 onMounted(() => {
   void topology.ensureSupports()
@@ -88,63 +92,113 @@ watch(
   { immediate: true },
 )
 
-interface Item {
+/** A term-point in the tree (shown inside the box of its node) */
+interface TpItem {
   id: string
-  /** node name, or "node:term-point" for a term-point */
+  /** name of the term-point */
   name: string
-  layer: string
-  type: 'node' | 'tp'
   diff?: string
 }
-/** The traced objects (nodes and term-points). Not ready (null) until their layers are loaded */
-const items = computed<Item[] | null>(() => {
+/**
+ * A node with its traced term-points: the term-points are always shown together with their node
+ * (so that it is clear which node a term-point belongs to).
+ */
+interface Group {
+  /** ID of the node */
+  id: string
+  name: string
+  layer: string
+  /** The node itself is in the tree (otherwise the node is shown only as the context of its term-points) */
+  nodeTraced: boolean
+  diff?: string
+  tps: TpItem[]
+}
+/** The groups of the traced objects. Not ready (null) until their layers are loaded */
+const groups = computed<Group[] | null>(() => {
   const result = trace.value
   if (!result) return null
-  const list: Item[] = []
+  const map = new Map<string, Group>()
+  const groupOf = (nodeId: string, layer: string): Group | null => {
+    const found = map.get(nodeId)
+    if (found) return found
+    const node = topology.objects.get(nodeId)
+    if (node?.type !== 'node') return null
+    const group: Group = {
+      id: nodeId,
+      name: node.data.name,
+      layer,
+      nodeTraced: false,
+      diff: node.data.diff,
+      tps: [],
+    }
+    map.set(nodeId, group)
+    return group
+  }
   for (const id of result.ids) {
     const entry = topology.objects.get(id)
     if (!entry) return null
-    if (entry.type === 'node')
-      list.push({ id, name: entry.data.name, layer: entry.layer, type: 'node', diff: entry.data.diff })
-    else if (entry.type === 'tp') {
-      const parent = topology.objects.get(entry.data.node)
-      const nodeName = parent?.type === 'node' ? parent.data.name : entry.data.node
-      list.push({
-        id,
-        name: `${nodeName}:${entry.data.name}`,
-        layer: entry.layer,
-        type: 'tp',
-        diff: entry.data.diff,
-      })
+    if (entry.type === 'node') {
+      const group = groupOf(id, entry.layer)
+      if (!group) return null
+      group.nodeTraced = true
+    } else if (entry.type === 'tp') {
+      const group = groupOf(entry.data.node, entry.layer)
+      if (!group) return null
+      group.tps.push({ id, name: entry.data.name, diff: entry.data.diff })
     }
   }
-  return list
+  return [...map.values()]
 })
-const itemById = computed(() => new Map((items.value ?? []).map((item) => [item.id, item])))
+const groupByObject = computed(() => {
+  const map = new Map<string, Group>()
+  for (const group of groups.value ?? []) {
+    map.set(group.id, group)
+    for (const tp of group.tps) map.set(tp.id, group)
+  }
+  return map
+})
+const tpById = computed(
+  () => new Map((groups.value ?? []).flatMap((group) => group.tps.map((tp) => [tp.id, tp] as const))),
+)
 
 /** Supports between the shown objects (from: upper, to: lower) */
 const edges = computed(() =>
-  (trace.value?.edges ?? []).filter((edge) => itemById.value.has(edge.from) && itemById.value.has(edge.to)),
+  (trace.value?.edges ?? []).filter(
+    (edge) => groupByObject.value.has(edge.from) && groupByObject.value.has(edge.to),
+  ),
 )
 
 /** Layers of the shown objects from the top to the bottom */
 const bandLayers = computed(() => {
-  const present = new Set((items.value ?? []).map((item) => item.layer))
+  const present = new Set((groups.value ?? []).map((group) => group.layer))
   return layersTopDown(topology.summary?.layers ?? []).filter((layer) => present.has(layer.id))
 })
 
+const tpSlotWidth = (tp: TpItem) => Math.max(TP_MIN_SLOT, tp.name.length * LABEL_CHAR_WIDTH + 8)
+/** Width of a group: the name of the node and the term-points in a row */
+function groupWidth(group: Group): number {
+  const nameWidth = group.name.length * LABEL_CHAR_WIDTH + 16
+  if (group.tps.length === 0) return nameWidth
+  return Math.max(nameWidth, group.tps.reduce((sum, tp) => sum + tpSlotWidth(tp), 0) + 16)
+}
+
 const layout = computed(() => {
-  if (!items.value) return null
-  const longest = Math.max(1, ...items.value.map((item) => item.name.length))
-  // labels are put in 2 rows alternately, so a label may be as wide as 2 gaps
-  const gap = Math.min(110, Math.max(DEFAULT_BAND_OPTIONS.gap, (longest * LABEL_CHAR_WIDTH) / 2 + 8))
+  if (!groups.value) return null
+  // supports between the groups (the supports between term-points are rolled up to their nodes)
+  const groupEdges = new Map<string, { from: string; to: string }>()
+  for (const edge of edges.value) {
+    const [from, to] = [groupByObject.value.get(edge.from)?.id, groupByObject.value.get(edge.to)?.id]
+    if (from && to && from !== to) groupEdges.set(pairKey(from, to), { from, to })
+  }
   return layoutBands(
     bandLayers.value.map((layer) => ({
       id: layer.id,
-      nodes: (items.value ?? []).filter((item) => item.layer === layer.id),
+      nodes: (groups.value ?? [])
+        .filter((group) => group.layer === layer.id)
+        .map((group) => ({ id: group.id, name: group.name, width: groupWidth(group) })),
     })),
-    edges.value.map((edge) => ({ from: edge.from, to: edge.to })),
-    { gap, bandSpacing: BAND_HEIGHT * 1.4 },
+    [...groupEdges.values()],
+    { gap: 24, bandSpacing: BAND_HEIGHT * 1.2 },
   )
 })
 
@@ -170,31 +224,58 @@ const report = computed(() => {
   })
 })
 
-interface DrawnItem extends Item {
+interface DrawnTp extends TpItem {
+  x: number
+}
+interface DrawnGroup extends Group {
   x: number
   y: number
+  width: number
+  /** The group has a box (it has term-points) */
+  boxed: boolean
+  drawnTps: DrawnTp[]
   issues: Issue<string>[]
-  /** Row of the label (neighbors in a band have labels in different rows) */
-  labelRow: number
   floating: boolean
 }
-const drawnItems = computed<DrawnItem[]>(() => {
+const drawnGroups = computed<DrawnGroup[]>(() => {
   const l = layout.value
-  if (!l || !items.value) return []
-  const list = items.value.flatMap((item) => {
-    const p = l.positions.get(item.id)
-    if (!p) return []
-    const issues = item.type === 'node' ? (report.value?.nodeIssues.get(item.id) ?? []) : []
-    return [{ ...item, x: p.x, y: p.y, issues, labelRow: 0, floating: l.floating.has(item.id) }]
-  })
-  // alternate the rows of the labels in each band (from left to right)
-  const count = new Map<string, number>()
-  for (const item of [...list].sort((a, b) => a.x - b.x)) {
-    const n = count.get(item.layer) ?? 0
-    item.labelRow = n % 2
-    count.set(item.layer, n + 1)
+  if (!l || !groups.value) return []
+  const lowerOf = new Map<string, string[]>()
+  for (const edge of edges.value) lowerOf.set(edge.from, [...(lowerOf.get(edge.from) ?? []), edge.to])
+
+  // the lowest layer first: the order of the term-points in a node follows the positions of the term-points below
+  const tpX = new Map<string, number>()
+  const result: DrawnGroup[] = []
+  for (const layer of [...bandLayers.value].reverse()) {
+    for (const group of groups.value.filter((g) => g.layer === layer.id)) {
+      const p = l.positions.get(group.id)
+      if (!p) continue
+      const wanted = (tp: TpItem) => {
+        const xs = (lowerOf.get(tp.id) ?? []).flatMap((id) => (tpX.has(id) ? [tpX.get(id) as number] : []))
+        return xs.length > 0 ? xs.reduce((sum, x) => sum + x, 0) / xs.length : p.x
+      }
+      const sorted = [...group.tps].sort((a, b) => wanted(a) - wanted(b) || compareNames(a.name, b.name))
+      const total = sorted.reduce((sum, tp) => sum + tpSlotWidth(tp), 0)
+      let cursor = p.x - total / 2
+      const drawnTps = sorted.map((tp) => {
+        const x = cursor + tpSlotWidth(tp) / 2
+        cursor += tpSlotWidth(tp)
+        tpX.set(tp.id, x)
+        return { ...tp, x }
+      })
+      result.push({
+        ...group,
+        x: p.x,
+        y: p.y,
+        width: groupWidth(group),
+        boxed: group.tps.length > 0,
+        drawnTps,
+        issues: report.value?.nodeIssues.get(group.id) ?? [],
+        floating: l.floating.has(group.id),
+      })
+    }
   }
-  return list
+  return result
 })
 const bands = computed(() => {
   const l = layout.value
@@ -219,11 +300,22 @@ interface DrawnEdge {
   y2: number
   issues: Issue<string>[]
 }
+/** Ends of the supports: a term-point circle, or the bottom (upper end) / top (lower end) of a node */
 const drawnEdges = computed<DrawnEdge[]>(() => {
-  const l = layout.value
-  if (!l) return []
+  const nodes = new Map(drawnGroups.value.map((group) => [group.id, group]))
+  const tps = new Map<string, { x: number; y: number }>()
+  for (const group of drawnGroups.value)
+    for (const tp of group.drawnTps) tps.set(tp.id, { x: tp.x, y: group.y + TP_Y })
+  const end = (id: string, upper: boolean): { x: number; y: number } | undefined => {
+    const tp = tps.get(id)
+    if (tp) return tp
+    const group = nodes.get(id)
+    if (!group) return undefined
+    const half = group.boxed ? BOX_HEIGHT / 2 : NODE_RADIUS
+    return { x: group.x, y: group.y + (upper ? half : -half) }
+  }
   return edges.value.flatMap((edge) => {
-    const [a, b] = [l.positions.get(edge.from), l.positions.get(edge.to)]
+    const [a, b] = [end(edge.from, true), end(edge.to, false)]
     if (!a || !b) return []
     const key = pairKey(edge.from, edge.to)
     const issues = edge.kind === 'node' ? (report.value?.edgeIssues.get(key) ?? []) : []
@@ -231,21 +323,23 @@ const drawnEdges = computed<DrawnEdge[]>(() => {
   })
 })
 
-function itemClass(item: DrawnItem): Record<string, boolean> {
+const selectedId = computed(() => target.value?.data.id)
+function groupClass(group: DrawnGroup): Record<string, boolean> {
   return {
-    selected: item.id === target.value?.data.id,
-    tp: item.type === 'tp',
-    [`diff-${item.diff}`]: Boolean(item.diff),
-    warn: showIssues.value && item.issues.some((i) => i.severity === 'warn'),
-    info: showIssues.value && item.issues.length > 0 && item.issues.every((i) => i.severity === 'info'),
+    selected: group.id === selectedId.value,
+    boxed: group.boxed,
+    context: !group.nodeTraced,
+    [`diff-${group.diff}`]: Boolean(group.diff),
+    warn: showIssues.value && group.issues.some((i) => i.severity === 'warn'),
+    info: showIssues.value && group.issues.length > 0 && group.issues.every((i) => i.severity === 'info'),
     // the chain ends here: nothing supports the object in the lower layers
-    floating: showIssues.value && item.floating,
+    floating: showIssues.value && group.floating,
   }
 }
-function titleOf(item: DrawnItem): string {
-  const notes = item.issues.map((i) => `! ${i.message}`)
-  if (item.floating) notes.push('! no supporting object in the lower layers (the chain ends here)')
-  return [item.name, ...notes].join('\n')
+function titleOf(group: DrawnGroup): string {
+  const notes = group.issues.map((i) => `! ${i.message}`)
+  if (group.floating) notes.push('! no supporting object in the lower layers (the chain ends here)')
+  return [group.name, ...notes].join('\n')
 }
 
 /** Problems of the shown objects (counts and the list) */
@@ -255,6 +349,11 @@ const issueList = computed(() => {
   const list: { key: string; severity: string; code: string; text: string; select?: string }[] = []
   const shownLayers = new Set(bandLayers.value.map((layer) => layer.id))
   const layerName = (id: string) => bandLayers.value.find((layer) => layer.id === id)?.name ?? id
+  const nameOf = (id: string) => {
+    const group = groupByObject.value.get(id)
+    const tp = tpById.value.get(id)
+    return tp ? `${group?.name}:${tp.name}` : (group?.name ?? id)
+  }
   for (const issue of r.layerIssues) {
     if (!shownLayers.has(issue.from) || !shownLayers.has(issue.to)) continue
     list.push({
@@ -264,14 +363,14 @@ const issueList = computed(() => {
       text: `${layerName(issue.from)} → ${layerName(issue.to)}: ${issue.message}`,
     })
   }
-  for (const item of drawnItems.value)
-    for (const issue of item.issues)
+  for (const group of drawnGroups.value)
+    for (const issue of group.issues)
       list.push({
-        key: `node:${issue.code}:${item.id}`,
+        key: `node:${issue.code}:${group.id}`,
         severity: issue.severity,
         code: issue.code,
-        text: `${item.name}: ${issue.message}`,
-        select: item.id,
+        text: `${group.name}: ${issue.message}`,
+        select: group.id,
       })
   for (const edge of drawnEdges.value)
     for (const issue of edge.issues)
@@ -279,7 +378,7 @@ const issueList = computed(() => {
         key: `edge:${issue.code}:${edge.key}`,
         severity: issue.severity,
         code: issue.code,
-        text: `${itemById.value.get(edge.from)?.name} → ${itemById.value.get(edge.to)?.name}: ${issue.message}`,
+        text: `${nameOf(edge.from)} → ${nameOf(edge.to)}: ${issue.message}`,
         select: edge.from,
       })
   return list.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'warn' ? -1 : 1))
@@ -345,7 +444,7 @@ function onFit(): void {
         Mark problems
       </label>
       <button
-        v-if="items"
+        v-if="groups"
         type="button"
         class="issue-count"
         data-testid="issue-count"
@@ -355,7 +454,7 @@ function onFit(): void {
         problems: {{ counts.warn }} warn / {{ counts.info }} info
       </button>
     </div>
-    <ul v-if="showList && items" class="issue-list" data-testid="issue-list">
+    <ul v-if="showList && groups" class="issue-list" data-testid="issue-list">
       <li v-if="issueList.length === 0">No problems found.</li>
       <li v-for="item in issueList" :key="item.key" :class="item.severity">
         <button v-if="item.select" type="button" class="link" @click="void selectObject(item.select)">
@@ -370,7 +469,7 @@ function onFit(): void {
       Select a node or a term-point in the topology view to see what supports it and what it supports.
     </p>
     <p v-else-if="!target" class="note">Links have no dependency tree: select a node or a term-point.</p>
-    <p v-else-if="!items" class="note">Loading...</p>
+    <p v-else-if="!groups" class="note">Loading...</p>
     <svg ref="svgEl" class="dependency-svg" data-testid="dependency-svg">
       <g :transform="transform.toString()">
         <g
@@ -381,7 +480,22 @@ function onFit(): void {
           :style="{ '--layer-color': band.color }"
         >
           <rect :x="band.x" :y="band.y - BAND_HEIGHT / 2" :width="band.width" :height="BAND_HEIGHT" />
-          <text :x="band.x + 6" :y="band.y - BAND_HEIGHT / 2 + 14" class="band-label">{{ band.name }}</text>
+          <text :x="band.x + 6" :y="band.y - BAND_HEIGHT / 2 + 12" class="band-label">{{ band.name }}</text>
+        </g>
+        <!-- nodes with term-points: a box (the term-points are inside the box of their node) -->
+        <g
+          v-for="group in drawnGroups.filter((g) => g.boxed)"
+          :key="`box:${group.id}`"
+          class="group"
+          :class="groupClass(group)"
+          :data-id="group.id"
+          :transform="`translate(${group.x},${group.y})`"
+          :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
+          @click.stop="void selectObject(group.id)"
+        >
+          <title>{{ titleOf(group) }}</title>
+          <rect :x="-group.width / 2" :y="-BOX_HEIGHT / 2" :width="group.width" :height="BOX_HEIGHT" rx="6" />
+          <text class="group-name" :y="-BOX_HEIGHT / 2 + 14" text-anchor="middle">{{ group.name }}</text>
         </g>
         <g class="edges">
           <line
@@ -401,20 +515,38 @@ function onFit(): void {
             </title>
           </line>
         </g>
+        <!-- nodes without term-points: a circle -->
         <g
-          v-for="item in drawnItems"
-          :key="item.id"
+          v-for="group in drawnGroups.filter((g) => !g.boxed)"
+          :key="`node:${group.id}`"
           class="node"
-          :class="itemClass(item)"
-          :data-id="item.id"
-          :transform="`translate(${item.x},${item.y})`"
-          :style="{ '--layer-color': layerColor(item.layer, layerOrder) }"
-          @click.stop="void selectObject(item.id)"
+          :class="groupClass(group)"
+          :data-id="group.id"
+          :transform="`translate(${group.x},${group.y})`"
+          :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
+          @click.stop="void selectObject(group.id)"
         >
-          <title>{{ titleOf(item) }}</title>
-          <circle :r="item.type === 'tp' ? TP_RADIUS : NODE_RADIUS" />
-          <text :y="NODE_RADIUS + 11 + item.labelRow * 11" text-anchor="middle">{{ item.name }}</text>
+          <title>{{ titleOf(group) }}</title>
+          <circle :r="NODE_RADIUS" />
+          <text :y="NODE_RADIUS + 11" text-anchor="middle">{{ group.name }}</text>
         </g>
+        <template v-for="group in drawnGroups" :key="`tps:${group.id}`">
+          <g
+            v-for="tp in group.drawnTps"
+            :key="tp.id"
+            class="node tp"
+            :class="{ selected: tp.id === selectedId, [`diff-${tp.diff}`]: Boolean(tp.diff) }"
+            :data-id="tp.id"
+            :data-node="group.id"
+            :transform="`translate(${tp.x},${group.y + TP_Y})`"
+            :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
+            @click.stop="void selectObject(tp.id)"
+          >
+            <title>{{ group.name }}:{{ tp.name }}</title>
+            <circle :r="TP_RADIUS" />
+            <text :y="TP_RADIUS + 10" text-anchor="middle">{{ tp.name }}</text>
+          </g>
+        </template>
       </g>
     </svg>
   </div>
@@ -527,6 +659,44 @@ function onFit(): void {
   fill: Canvas;
   stroke: var(--layer-color);
   stroke-width: 2;
+}
+.dependency-svg .group rect {
+  fill: var(--layer-color);
+  fill-opacity: 0.12;
+  stroke: var(--layer-color);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+.dependency-svg .group.context rect {
+  stroke-dasharray: 4 3;
+  fill-opacity: 0.05;
+}
+.dependency-svg .group-name {
+  font-size: 10px;
+  font-weight: bold;
+  fill: currentColor;
+  cursor: pointer;
+}
+.dependency-svg .group.warn rect {
+  stroke: var(--changed);
+  stroke-width: 3;
+}
+.dependency-svg .group.info rect {
+  stroke-opacity: 0.6;
+  stroke-dasharray: 2 2;
+}
+.dependency-svg .group.selected rect {
+  stroke: currentColor;
+  stroke-width: 3;
+}
+.dependency-svg .group.diff-added rect {
+  stroke: var(--added);
+}
+.dependency-svg .group.diff-deleted rect {
+  stroke: var(--deleted);
+}
+.dependency-svg .group.diff-changed rect {
+  stroke: var(--changed);
 }
 .dependency-svg .node.floating circle {
   stroke-dasharray: 2 2;

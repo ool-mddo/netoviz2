@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutBands, spaceOut, type BandLayer } from './bands'
+import { layoutBands, spaceOut, spaceOutNodes, type BandLayer } from './bands'
 
 const node = (id: string) => ({ id, name: id })
 const OPTS = { gap: 10, bandSpacing: 100 }
@@ -26,7 +26,34 @@ describe('spaceOut', () => {
   })
 })
 
+describe('spaceOutNodes', () => {
+  it('keeps the space between the edges of nodes of different widths', () => {
+    const xs = spaceOutNodes([0, 0], [40, 20], 10)
+    // the centers are (40 + 20) / 2 + 10 = 40 apart
+    expect((xs[1] ?? 0) - (xs[0] ?? 0)).toBeCloseTo(40)
+    expect(((xs[0] ?? 0) + (xs[1] ?? 0)) / 2).toBeCloseTo(0)
+  })
+
+  it('is the same as spaceOut for nodes without width', () => {
+    expect(spaceOutNodes([0, 3, 4, 50], [0, 0, 0, 0], 10)).toEqual(spaceOut([0, 3, 4, 50], 10))
+  })
+})
+
 describe('layoutBands', () => {
+  it('keeps wide nodes apart (by their widths)', () => {
+    const wide: BandLayer[] = [
+      {
+        id: 'l',
+        nodes: [
+          { id: 'a', name: 'a', width: 100 },
+          { id: 'b', name: 'b', width: 100 },
+        ],
+      },
+    ]
+    const { positions } = layoutBands(wide, [], OPTS)
+    expect((positions.get('b')?.x ?? 0) - (positions.get('a')?.x ?? 0)).toBeGreaterThanOrEqual(110 - 1e-9)
+  })
+
   it('puts a node without a supporting node below the upper node which it supports', () => {
     // t is supported by m only; m supports nothing below, but m is supported-by-nothing: m is below t
     const three: BandLayer[] = [

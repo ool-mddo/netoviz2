@@ -45,7 +45,7 @@ afterEach(() => {
 
 const q = (wrapper: ReturnType<typeof mount>, selector: string) => wrapper.element.querySelectorAll(selector)
 const ids = (wrapper: ReturnType<typeof mount>) =>
-  [...q(wrapper, 'g.node')].map((el) => el.getAttribute('data-id')).sort()
+  [...q(wrapper, 'g.node, g.group')].map((el) => el.getAttribute('data-id')).sort()
 
 describe('DependencyView', () => {
   it('asks to select an object when nothing is selected', async () => {
@@ -72,6 +72,8 @@ describe('DependencyView', () => {
     }
     expect(y('layer2/r1')).toBeLessThan(y('layer1/sw1'))
     expect(wrapper.get('g.node[data-id="layer2/r1"]').classes()).toContain('selected')
+    // nodes without term-points are not boxes
+    expect(q(wrapper, 'g.group')).toHaveLength(0)
   })
 
   it('shows the objects supported by the selected node (the upper layers)', async () => {
@@ -89,8 +91,10 @@ describe('DependencyView', () => {
   it('shows the term-points of a selected term-point with the names of their nodes', async () => {
     const { wrapper } = await mountView('layer2/r1/e1')
     current = wrapper
-    expect(ids(wrapper)).toEqual(['layer1/sw1/p1', 'layer2/r1/e1'])
-    expect(wrapper.get('g.node[data-id="layer2/r1/e1"]').text()).toContain('r1:e1')
+    // the nodes of the term-points are shown too (the boxes which hold them)
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer1/sw1/p1', 'layer2/r1', 'layer2/r1/e1'])
+    expect(wrapper.get('g.node[data-id="layer2/r1/e1"]').text()).toContain('e1')
+    expect(wrapper.get('g.group[data-id="layer2/r1"]').text()).toContain('r1')
     expect(wrapper.get('g.node[data-id="layer1/sw1/p1"]').classes()).toContain('tp')
     expect(q(wrapper, 'line.support')).toHaveLength(1)
     // a term-point has no choice of the term-points
@@ -106,12 +110,34 @@ describe('DependencyView', () => {
     expect(q(wrapper, 'line.support')).toHaveLength(2)
   })
 
+  it('keeps a term-point with its node: the term-point is inside the box of the node', async () => {
+    const { wrapper } = await mountView('layer2/r1/e1')
+    current = wrapper
+    const translate = (el: Element) => {
+      const m = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(el.getAttribute('transform') ?? '')
+      return { x: Number(m?.[1]), y: Number(m?.[2]) }
+    }
+    const tp = wrapper.get('g.node.tp[data-id="layer2/r1/e1"]')
+    expect(tp.attributes('data-node')).toBe('layer2/r1')
+    const box = wrapper.get('g.group[data-id="layer2/r1"]')
+    const width = Number(box.get('rect').attributes('width'))
+    const [t, b] = [translate(tp.element), translate(box.element)]
+    expect(Math.abs(t.x - b.x)).toBeLessThanOrEqual(width / 2)
+    expect(Math.abs(t.y - b.y)).toBeLessThan(Number(box.get('rect').attributes('height')) / 2)
+  })
+
+  it('shows the node of a term-point as the context (the node itself is not in the tree)', async () => {
+    const { wrapper } = await mountView('layer2/r1/e1')
+    current = wrapper
+    expect(wrapper.get('g.group[data-id="layer2/r1"]').classes()).toContain('context')
+  })
+
   it('shows the tree when the object is selected after the view is shown', async () => {
     const { wrapper, selection } = await mountView()
     current = wrapper
     selection.select('layer2/r1/e1')
     await flushPromises()
-    expect(ids(wrapper)).toEqual(['layer1/sw1/p1', 'layer2/r1/e1'])
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer1/sw1/p1', 'layer2/r1', 'layer2/r1/e1'])
   })
 
   it('loads the layers of the traced objects (even if they are not shown in the topology view)', async () => {
