@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutBands, spaceOut, spaceOutNodes, type BandLayer } from './bands'
+import { detourPath, layoutBands, spaceOut, spaceOutNodes, type BandLayer } from './bands'
 
 const node = (id: string) => ({ id, name: id })
 const OPTS = { gap: 10, bandSpacing: 100 }
@@ -144,5 +144,12 @@ describe('layoutBands', () => {
     const result = layoutBands([], [], OPTS)
     expect(result.positions.size).toBe(0)
     expect(result.minX).toBe(0)
+  })
+})
+
+describe('detourPath', () => {
+  it('bends the line to the side so that it leaves the straight line between the ends', () => {
+    expect(detourPath({ x: 0, y: 0 }, { x: 0, y: 300 }, 34)).toBe('M0,0 C34,100 34,200 0,300')
+    expect(detourPath({ x: 0, y: 0 }, { x: 0, y: 300 }, -34)).toContain('C-34,')
   })
 })

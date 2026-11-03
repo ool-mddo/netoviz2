@@ -141,6 +141,8 @@ export class ForceRenderer {
   /** ID of the port => IDs of the nodes connected to the port */
   private peersOf = new Map<string, Set<string>>()
   private readonly positions = new Map<string, { x: number; y: number }>()
+  /** ID of the port => angle on the circle of its node, set by the user dragging the port */
+  private readonly pinnedAngles = new Map<string, number>()
   /** Layers in the order (for colors) and the layers having elements (for the areas) */
   private layerOrder: readonly string[] = []
   private areaIndex = new Map<string, number>()
@@ -241,6 +243,7 @@ export class ForceRenderer {
   /** Arrange all the nodes again from scratch (the known positions are forgotten) */
   relayout(): void {
     this.positions.clear()
+    this.pinnedAngles.clear()
     this.bodies = []
     this.appliedSignature = ''
     this.userMoved = false
@@ -555,7 +558,8 @@ export class ForceRenderer {
       const desired = ports.map((port) => this.desiredAngle(node, port, center))
       const angles = spreadAngles(desired, PORT_ARC / node.radius)
       ports.forEach((port, i) => {
-        const angle = angles[i] ?? 0
+        // a port moved by the user keeps its angle
+        const angle = this.pinnedAngles.get(port.id) ?? angles[i] ?? 0
         port.angle = angle
         port.x = cx + node.radius * Math.cos(angle)
         port.y = cy + node.radius * Math.sin(angle)
@@ -632,6 +636,18 @@ export class ForceRenderer {
         this.setHover(d.id)
       })
       .on('mouseleave', () => this.setHover(null))
+    nodeSelection
+      .filter((d) => d.type === 'tp')
+      .call(
+        drag<SVGGElement, Item>().on('drag', (event, d) => {
+          // a port moves along the circle of its node, toward the pointer
+          const node = d.parent ? this.itemById.get(d.parent) : undefined
+          if (!node) return
+          this.pinnedAngles.set(d.id, Math.atan2(event.y - (node.y ?? 0), event.x - (node.x ?? 0)))
+          this.placePorts()
+          this.draw()
+        }),
+      )
     nodeSelection
       .filter((d) => d.type === 'node')
       .call(

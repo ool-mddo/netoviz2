@@ -265,8 +265,11 @@ describe('TopologyView', () => {
       mocked.getAttributes.mockResolvedValue(attributesData)
       const wrapper = await mountView('/nw/ss?layers=layer1,layer2&dependency=1&sel=layer2%2Fr1')
       await flushPromises()
+      // sw1 and the term-point of r1 (a node with term-points is a box: g.group)
       expect(wrapper.findAll('[data-testid=dependency-svg] g.node')).toHaveLength(2)
-      expect(wrapper.findAll('g.node.selected[data-id="layer2/r1"]').length).toBeGreaterThanOrEqual(2)
+      expect(
+        wrapper.findAll('[data-testid=dependency-svg] g.group.selected[data-id="layer2/r1"]'),
+      ).toHaveLength(1)
     })
   })
 

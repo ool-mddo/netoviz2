@@ -203,3 +203,14 @@ export function spaceOutWith(wanted: readonly number[], distances: readonly numb
   }
   return result
 }
+
+/**
+ * Path of a line from `a` to `b` bent to the side by `offset` (cubic Bezier curve), so that it does not overlap
+ * the straight lines between the same positions (e.g. a support which skips a layer is on the same line as the
+ * support to the node of the layer between when the nodes are aligned vertically).
+ */
+export function detourPath(a: Position, b: Position, offset: number): string {
+  const cx = (a.x + b.x) / 2 + offset
+  const [y1, y2] = [a.y + (b.y - a.y) / 3, a.y + ((b.y - a.y) * 2) / 3]
+  return `M${a.x},${a.y} C${cx},${y1} ${cx},${y2} ${b.x},${b.y}`
+}

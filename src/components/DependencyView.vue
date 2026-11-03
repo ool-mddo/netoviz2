@@ -7,7 +7,7 @@ import { layerOfId, layersTopDown } from '../domain/layers'
 import { checkSupports, pairKey, type Issue } from '../domain/supportCheck'
 import { traceSupports } from '../domain/tracer'
 import { layerColor } from '../render/forceRenderer'
-import { compareNames, layoutBands } from '../render/layout/bands'
+import { compareNames, detourPath, layoutBands } from '../render/layout/bands'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 
@@ -145,6 +145,18 @@ const groups = computed<Group[] | null>(() => {
       const group = groupOf(entry.data.node, entry.layer)
       if (!group) return null
       group.tps.push({ id, name: entry.data.name, diff: entry.data.diff })
+    }
+  }
+  // all the term-points of the selected node are shown (even those without supports)
+  const entry = target.value
+  if (entry?.type === 'node') {
+    const group = groupOf(entry.data.id, entry.layer)
+    if (group) {
+      group.nodeTraced = true
+      for (const tp of topology.tpsOfNode.get(entry.data.id) ?? []) {
+        if (!group.tps.some((item) => item.id === tp.id))
+          group.tps.push({ id: tp.id, name: tp.name, diff: tp.diff })
+      }
     }
   }
   return [...map.values()]
@@ -299,7 +311,11 @@ interface DrawnEdge {
   x2: number
   y2: number
   issues: Issue<string>[]
+  /** Path of the line: a curve if the support skips layers (so that it does not overlap the supports through the layers) */
+  d: string
 }
+/** Offset of the curve of a support which skips layers */
+const DETOUR_STEP = 34
 /** Ends of the supports: a term-point circle, or the bottom (upper end) / top (lower end) of a node */
 const drawnEdges = computed<DrawnEdge[]>(() => {
   const nodes = new Map(drawnGroups.value.map((group) => [group.id, group]))
@@ -314,12 +330,25 @@ const drawnEdges = computed<DrawnEdge[]>(() => {
     const half = group.boxed ? BOX_HEIGHT / 2 : NODE_RADIUS
     return { x: group.x, y: group.y + (upper ? half : -half) }
   }
+  const bandIndex = new Map(bandLayers.value.map((layer, i) => [layer.id, i]))
+  /** Number of the supports which skip layers, for each upper object (to separate the curves) */
+  const detours = new Map<string, number>()
   return edges.value.flatMap((edge) => {
     const [a, b] = [end(edge.from, true), end(edge.to, false)]
     if (!a || !b) return []
     const key = pairKey(edge.from, edge.to)
     const issues = edge.kind === 'node' ? (report.value?.edgeIssues.get(key) ?? []) : []
-    return [{ key, from: edge.from, to: edge.to, x1: a.x, y1: a.y, x2: b.x, y2: b.y, issues }]
+    const [upper, lower] = [groupByObject.value.get(edge.from), groupByObject.value.get(edge.to)]
+    const skipped =
+      Math.abs((bandIndex.get(lower?.layer ?? '') ?? 0) - (bandIndex.get(upper?.layer ?? '') ?? 0)) - 1
+    let d = `M${a.x},${a.y} L${b.x},${b.y}`
+    if (skipped > 0) {
+      // bend the line to the side, away from the objects between the layers
+      const count = detours.get(edge.from) ?? 0
+      detours.set(edge.from, count + 1)
+      d = detourPath(a, b, DETOUR_STEP * (count + 1) * (count % 2 === 0 ? 1 : -1))
+    }
+    return [{ key, from: edge.from, to: edge.to, x1: a.x, y1: a.y, x2: b.x, y2: b.y, issues, d }]
   })
 })
 
@@ -498,13 +527,10 @@ function onFit(): void {
           <text class="group-name" :y="-BOX_HEIGHT / 2 + 14" text-anchor="middle">{{ group.name }}</text>
         </g>
         <g class="edges">
-          <line
+          <path
             v-for="edge in drawnEdges"
             :key="edge.key"
-            :x1="edge.x1"
-            :y1="edge.y1"
-            :x2="edge.x2"
-            :y2="edge.y2"
+            :d="edge.d"
             class="support"
             :class="{ warn: showIssues && edge.issues.length > 0 }"
             :data-from="edge.from"
@@ -513,7 +539,7 @@ function onFit(): void {
             <title v-if="edge.issues.length > 0">
               {{ edge.issues.map((i) => `! ${i.message}`).join('\n') }}
             </title>
-          </line>
+          </path>
         </g>
         <!-- nodes without term-points: a circle -->
         <g
@@ -602,6 +628,7 @@ function onFit(): void {
   opacity: 0.7;
 }
 .dependency-svg .support {
+  fill: none;
   stroke: #8888;
   stroke-width: 1.5;
 }
