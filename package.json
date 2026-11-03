@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Multi-layer network topology viewer for ool-mddo (frontend only; data comes from netomox-exp)",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24"

@@ -59,22 +59,22 @@ const infoCount = computed(() => props.summary.warnings.filter((w) => w.severity
   color: inherit;
 }
 .chip.diff {
-  border-color: #f9a825;
-  color: #f9a825;
+  border-color: var(--changed);
+  color: var(--changed-text);
 }
 .chip.warnings {
   cursor: pointer;
 }
 .chip.warnings.warn {
-  border-color: #c62828;
-  color: #c62828;
+  border-color: var(--error);
+  color: var(--error);
 }
 .warning-list {
   margin: 0.25rem 0;
   font-size: 0.85em;
 }
 .warning-list .warn {
-  color: #c62828;
+  color: var(--error);
 }
 .warning-list .info {
   opacity: 0.7;

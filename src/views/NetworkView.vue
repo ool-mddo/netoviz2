@@ -23,14 +23,14 @@ const snapshots = computed(() => index.snapshotsOf(props.network))
       >
         {{ item.snapshot }}
       </RouterLink>
-      <span class="label"> {{ item.label }}</span>
+      <span class="label">{{ item.label }}</span>
     </li>
   </ul>
 </template>
 
 <style scoped>
 .error {
-  color: #c62828;
+  color: var(--error);
 }
 .label {
   opacity: 0.6;
@@ -38,5 +38,11 @@ const snapshots = computed(() => index.snapshotsOf(props.network))
 }
 .snapshots {
   line-height: 1.8;
+}
+/* a space between the link and the label (a space in the template is removed by the compiler) */
+.snapshots li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75em;
 }
 </style>

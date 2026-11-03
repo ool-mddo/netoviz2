@@ -113,6 +113,26 @@ describe('TopologyView', () => {
     expect(mocked.getLayer).toHaveBeenCalledWith('nw', 'ss', 'layer1')
   })
 
+  it('shows all the layers by the button (select all)', async () => {
+    const wrapper = await mountView('/nw/ss?layers=layer1')
+    await wrapper.get('[data-testid=select-all]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query.layers).toBe('layer1,layer2')
+    expect(mocked.getLayer).toHaveBeenCalledWith('nw', 'ss', 'layer2')
+  })
+
+  it('clears all the layers by the button, and then one layer can be chosen', async () => {
+    const wrapper = await mountView('/nw/ss')
+    await wrapper.get('[data-testid=select-none]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query.layers).toBe('')
+    expect(wrapper.findAll('g.node')).toHaveLength(0)
+    await wrapper.get('[data-testid=toggle-layer2]').trigger('change')
+    await flushPromises()
+    expect(router.currentRoute.value.query.layers).toBe('layer2')
+    expect(wrapper.findAll('g.node:not(.tp)')).toHaveLength(1)
+  })
+
   it('ignores unknown layers in the URL query', async () => {
     const wrapper = await mountView('/nw/ss?layers=nothing')
     expect(mocked.getLayer).not.toHaveBeenCalled()

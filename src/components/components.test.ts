@@ -55,3 +55,13 @@ describe('SummaryBar network link', () => {
     )
   })
 })
+
+describe('LayerList: select all / clear all', () => {
+  it('tells that all the layers are selected or cleared', async () => {
+    const wrapper = mount(LayerList, { props: { layers: makeSummary().layers, visible: ['layer1'] } })
+    await wrapper.get('[data-testid=select-all]').trigger('click')
+    expect(wrapper.emitted('select-all')).toHaveLength(1)
+    await wrapper.get('[data-testid=select-none]').trigger('click')
+    expect(wrapper.emitted('select-none')).toHaveLength(1)
+  })
+})

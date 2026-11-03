@@ -17,14 +17,14 @@ onMounted(() => void index.load(true))
       <RouterLink :to="{ name: 'network', params: { network: item.network } }" data-testid="network-link">
         {{ item.network }}
       </RouterLink>
-      <span class="count"> {{ item.snapshots.length }} snapshots</span>
+      <span class="count">{{ item.snapshots.length }} snapshots</span>
     </li>
   </ul>
 </template>
 
 <style scoped>
 .error {
-  color: #c62828;
+  color: var(--error);
 }
 .count {
   opacity: 0.6;
@@ -32,5 +32,11 @@ onMounted(() => void index.load(true))
 }
 .networks {
   line-height: 1.8;
+}
+/* a space between the link and the text (a space in the template is removed by the compiler) */
+.networks li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75em;
 }
 </style>

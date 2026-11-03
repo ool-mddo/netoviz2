@@ -132,7 +132,7 @@ function valueClass(value: unknown): string {
 }
 .json-node > .children {
   margin-left: 1rem;
-  border-left: 1px solid #8883;
+  border-left: 1px solid var(--border-weak);
   padding-left: 0.5rem;
 }
 .json-node .key {
@@ -143,14 +143,14 @@ function valueClass(value: unknown): string {
   opacity: 0.6;
 }
 .json-node .value.string {
-  color: #2e7d32;
+  color: var(--value-string);
 }
 .json-node .value.number {
-  color: #1565c0;
+  color: var(--value-number);
 }
 .json-node .value.boolean,
 .json-node .value.null {
-  color: #8e24aa;
+  color: var(--value-other);
 }
 .json-node .badge,
 .row .badge {
@@ -158,20 +158,20 @@ function valueClass(value: unknown): string {
   padding: 0 0.3rem;
   margin-left: 0.4rem;
   font-size: 0.8em;
-  color: #fff;
+  color: var(--badge-text);
 }
 .badge.added {
-  background: #2e7d32;
+  background: var(--added);
 }
 .badge.deleted {
-  background: #c62828;
+  background: var(--deleted);
 }
 .badge.changed {
-  background: #f9a825;
+  background: var(--changed);
   color: #000;
 }
 .row.changed {
-  background: #f9a82522;
+  background: color-mix(in srgb, var(--changed) 14%, transparent);
 }
 .row .was {
   opacity: 0.7;

@@ -5,13 +5,17 @@ import { layersTopDown } from '../domain/layers'
 import { layerColor } from '../render/forceRenderer'
 
 const props = defineProps<{ layers: LayerInfo[]; visible: string[] }>()
-const emit = defineEmits<{ toggle: [layerId: string] }>()
+const emit = defineEmits<{ toggle: [layerId: string]; 'select-all': []; 'select-none': [] }>()
 
 const ordered = computed(() => layersTopDown(props.layers))
 const order = computed(() => ordered.value.map((layer) => layer.id))
 </script>
 
 <template>
+  <div class="layer-actions">
+    <button type="button" data-testid="select-all" @click="emit('select-all')">Select all</button>
+    <button type="button" data-testid="select-none" @click="emit('select-none')">Clear all</button>
+  </div>
   <ul class="layer-list">
     <li v-for="layer in ordered" :key="layer.id" :data-testid="`layer-${layer.id}`">
       <label>
@@ -36,6 +40,11 @@ const order = computed(() => ordered.value.map((layer) => layer.id))
 </template>
 
 <style scoped>
+.layer-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
 .layer-list {
   list-style: none;
   margin: 0;
@@ -43,7 +52,7 @@ const order = computed(() => ordered.value.map((layer) => layer.id))
 }
 .layer-list li {
   padding: 0.4rem 0;
-  border-bottom: 1px solid #8883;
+  border-bottom: 1px solid var(--border-weak);
 }
 .swatch {
   display: inline-block;

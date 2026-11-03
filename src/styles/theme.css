@@ -1,0 +1,33 @@
+/*
+ * Colors of the light and dark themes.
+ * `color-scheme` decides which one is used: the setting of the browser/OS by default, or the choice of the user
+ * (data-theme="light" / "dark" on <html>, see stores/theme.ts). `light-dark()` picks the color of the theme.
+ */
+:root {
+  color-scheme: light dark;
+
+  --error: light-dark(#c62828, #ef9a9a);
+  /* diff: added / deleted / changed */
+  --added: light-dark(#2e7d32, #81c784);
+  --deleted: light-dark(#c62828, #ef9a9a);
+  --changed: light-dark(#f9a825, #ffca28);
+  --changed-text: light-dark(#b26a00, #ffca28);
+  /* text on the colored backgrounds of the badges */
+  --badge-text: light-dark(#fff, #000);
+  /* support trace */
+  --trace: light-dark(#d81b60, #f48fb1);
+  /* values in the tree of attributes */
+  --value-string: light-dark(#2e7d32, #81c784);
+  --value-number: light-dark(#1565c0, #64b5f6);
+  --value-other: light-dark(#8e24aa, #ce93d8);
+  --border: #8884;
+  --border-weak: #8883;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

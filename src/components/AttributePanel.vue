@@ -137,7 +137,7 @@ const upperItems = computed(() => traced('upper'))
 
 <style scoped>
 .attribute-panel {
-  border: 1px solid #8884;
+  border: 1px solid var(--border);
   padding: 0.5rem 0.75rem;
   height: 72vh;
   overflow: auto;
@@ -151,7 +151,7 @@ const upperItems = computed(() => traced('upper'))
 h3 {
   margin: 0.75rem 0 0.25rem;
   font-size: 0.95em;
-  border-bottom: 1px solid #8883;
+  border-bottom: 1px solid var(--border-weak);
 }
 h4 {
   margin: 0.4rem 0 0.1rem;
@@ -166,16 +166,16 @@ h4 {
   font-size: 0.8em;
 }
 .chip.added {
-  border-color: #2e7d32;
-  color: #2e7d32;
+  border-color: var(--added);
+  color: var(--added);
 }
 .chip.deleted {
-  border-color: #c62828;
-  color: #c62828;
+  border-color: var(--deleted);
+  color: var(--deleted);
 }
 .chip.changed {
-  border-color: #f9a825;
-  color: #f9a825;
+  border-color: var(--changed);
+  color: var(--changed-text);
 }
 .empty {
   opacity: 0.6;

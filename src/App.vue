@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import AppBreadcrumb from './components/AppBreadcrumb.vue'
+import ThemeToggle from './components/ThemeToggle.vue'
 </script>
 
 <template>
   <header class="app-header">
     <AppBreadcrumb />
+    <ThemeToggle />
   </header>
   <main class="app-main">
     <RouterView />
@@ -14,7 +16,6 @@ import AppBreadcrumb from './components/AppBreadcrumb.vue'
 
 <style>
 :root {
-  color-scheme: light dark;
   font-family: system-ui, sans-serif;
 }
 body {
@@ -25,7 +26,7 @@ body {
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid #8884;
+  border-bottom: 1px solid var(--border);
 }
 .app-main {
   padding: 1rem;

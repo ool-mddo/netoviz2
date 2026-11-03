@@ -146,7 +146,7 @@ function onEngineChange(event: Event): void {
 .force-svg {
   width: 100%;
   height: 72vh;
-  border: 1px solid #8884;
+  border: 1px solid var(--border);
   cursor: grab;
 }
 .force-svg .link {
@@ -154,24 +154,24 @@ function onEngineChange(event: Event): void {
   stroke: #8888;
 }
 .force-svg .link.diff-added {
-  stroke: #2e7d32;
+  stroke: var(--added);
 }
 .force-svg .link.diff-deleted {
-  stroke: #c62828;
+  stroke: var(--deleted);
 }
 .force-svg .link.diff-changed {
-  stroke: #f9a825;
+  stroke: var(--changed);
 }
 .force-svg .node {
   cursor: pointer;
 }
 .force-svg .node circle {
   fill: var(--layer-color);
-  stroke: #fff;
+  stroke: Canvas;
   stroke-width: 1.5;
 }
 .force-svg .node.tp circle {
-  fill: #fff;
+  fill: Canvas;
   stroke: var(--layer-color);
   stroke-width: 2;
 }
@@ -196,19 +196,19 @@ function onEngineChange(event: Event): void {
   font-size: 7px;
 }
 .force-svg .node.diff-added circle {
-  stroke: #2e7d32;
+  stroke: var(--added);
   stroke-width: 3;
 }
 .force-svg .node.diff-deleted circle {
-  stroke: #c62828;
+  stroke: var(--deleted);
   stroke-width: 3;
 }
 .force-svg .node.diff-changed circle {
-  stroke: #f9a825;
+  stroke: var(--changed);
   stroke-width: 3;
 }
 .force-svg .node.traced circle {
-  stroke: #d81b60;
+  stroke: var(--trace);
   stroke-width: 3;
 }
 .force-svg .node.selected circle {
@@ -238,7 +238,7 @@ function onEngineChange(event: Event): void {
   opacity: 0.15;
 }
 .force-svg .trace-edge {
-  stroke: #d81b60;
+  stroke: var(--trace);
   stroke-width: 2;
   stroke-dasharray: 5 3;
   pointer-events: none;

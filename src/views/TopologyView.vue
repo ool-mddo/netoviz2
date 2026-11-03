@@ -101,6 +101,12 @@ function setCompare(on: boolean): void {
   setEngineQuery('compare', on ? other : null)
 }
 
+/** Show all the layers, or none of them (to pick up one layer, clear all and choose it) */
+function setAllLayers(all: boolean): void {
+  const layers = all ? (topology.summary?.layers ?? []).map((layer) => layer.id) : []
+  void router.replace({ query: { ...route.query, layers: layers.join(',') } })
+}
+
 function toggleLayer(layerId: string): void {
   const current = visibleLayers.value
   const next = current.includes(layerId) ? current.filter((id) => id !== layerId) : [...current, layerId]
@@ -120,7 +126,13 @@ onBeforeUnmount(() => selection.select(null))
     <p v-if="topology.error" class="error">{{ topology.error }}</p>
     <div class="layout">
       <aside class="side">
-        <LayerList :layers="topology.summary.layers" :visible="visibleLayers" @toggle="toggleLayer" />
+        <LayerList
+          :layers="topology.summary.layers"
+          :visible="visibleLayers"
+          @toggle="toggleLayer"
+          @select-all="setAllLayers(true)"
+          @select-none="setAllLayers(false)"
+        />
       </aside>
       <section class="viewer" data-testid="viewer">
         <ViewToolbar
@@ -163,6 +175,6 @@ onBeforeUnmount(() => selection.select(null))
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .error {
-  color: #c62828;
+  color: var(--error);
 }
 </style>
