@@ -6,6 +6,15 @@
     <title>netoviz2</title>
   </head>
   <body>
+    <script>
+      // apply the theme chosen by the user before the page is drawn (to avoid a flash of the other theme)
+      try {
+        var theme = localStorage.getItem('netoviz2.theme')
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
+      } catch (e) {
+        // the storage is not available: the setting of the browser is used
+      }
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
