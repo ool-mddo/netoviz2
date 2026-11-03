@@ -176,7 +176,7 @@ function onEngineChange(event: Event): void {
   stroke-width: 2;
 }
 /* names of term-points are shown when zoomed in, or when the term-point is selected/traced */
-.force-svg:not(.zoomed-in) .node.tp:not(.selected):not(.traced) text {
+.force-svg:not(.zoomed-in) .node.tp:not(.selected):not(.traced):not(.hover):not(.peer) text {
   display: none;
 }
 .force-svg .node.expanded circle {
@@ -225,8 +225,19 @@ function onEngineChange(event: Event): void {
   font-weight: bold;
   display: block;
 }
+/* the other end of the links of the hovered term-point */
+.force-svg .node.peer circle {
+  stroke: currentColor;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 3px var(--layer-color));
+}
+.force-svg .node.peer text {
+  font-weight: bold;
+}
 .force-svg .node.hover.dim,
-.force-svg .node.hover {
+.force-svg .node.hover,
+.force-svg .node.peer.dim,
+.force-svg .node.peer {
   opacity: 1;
 }
 .force-svg .link.hover {

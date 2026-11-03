@@ -706,7 +706,18 @@ export class ForceRenderer {
 
   private applyHover(): void {
     const id = this.hoverId
-    this.nodeLayer.selectAll<SVGGElement, Item>('g.node').classed('hover', (d) => d.id === id)
+    // hovering a term-point: the term-points at the other ends of its links (with their names) are shown too
+    const peers = new Set<string>()
+    if (id !== null && this.itemById.get(id)?.type === 'tp') {
+      for (const link of this.drawLinks) {
+        if (link.source === id) peers.add(link.target)
+        if (link.target === id) peers.add(link.source)
+      }
+    }
+    this.nodeLayer
+      .selectAll<SVGGElement, Item>('g.node')
+      .classed('hover', (d) => d.id === id)
+      .classed('peer', (d) => peers.has(d.id))
     // the links of a node include the links of its term-points
     const touches = (end: string) => id !== null && (end === id || this.itemById.get(end)?.parent === id)
     this.linkLayer

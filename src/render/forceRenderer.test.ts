@@ -214,6 +214,16 @@ describe('ForceRenderer', () => {
       expect(svg.querySelectorAll('g.node.hover')).toHaveLength(0)
     })
 
+    it('marks the term-point at the other end of the links of the hovered term-point as a peer', () => {
+      renderer.setGraph(graph, ['l1', 'l2'])
+      nodeEl('l1/a/p1').dispatchEvent(new MouseEvent('mouseenter'))
+      expect(nodeEl('l1/b/p1').classList.contains('peer')).toBe(true)
+      expect(nodeEl('l1/a/p2').classList.contains('peer')).toBe(false)
+      expect(svg.querySelectorAll('path.link.hover')).toHaveLength(1)
+      nodeEl('l1/a/p1').dispatchEvent(new MouseEvent('mouseleave'))
+      expect(svg.querySelectorAll('g.node.peer')).toHaveLength(0)
+    })
+
     it('marks only the element under the pointer when the pointer moves to another element', () => {
       nodeEl('l1/a').dispatchEvent(new MouseEvent('mouseenter'))
       nodeEl('l1/a').dispatchEvent(new MouseEvent('mouseleave'))

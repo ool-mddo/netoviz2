@@ -341,9 +341,26 @@ const drawnEdges = computed<DrawnEdge[]>(() => {
 })
 
 const selectedId = computed(() => target.value?.data.id)
+
+/** Object under the pointer: its supports and the objects at the other ends are highlighted */
+const hoverId = ref<string | null>(null)
+const hover = computed(() => {
+  const id = hoverId.value
+  const keys = new Set<string>()
+  const peers = new Set<string>()
+  if (id === null) return { keys, peers }
+  for (const edge of drawnEdges.value) {
+    if (edge.from !== id && edge.to !== id) continue
+    keys.add(edge.key)
+    peers.add(edge.from === id ? edge.to : edge.from)
+  }
+  return { keys, peers }
+})
 function groupClass(group: DrawnGroup): Record<string, boolean> {
   return {
     selected: group.id === selectedId.value,
+    hover: group.id === hoverId.value,
+    peer: hover.value.peers.has(group.id),
     boxed: group.boxed,
     context: !group.nodeTraced,
     [`diff-${group.diff}`]: Boolean(group.diff),
@@ -509,6 +526,8 @@ function onFit(): void {
           :transform="`translate(${group.x},${group.y})`"
           :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
           @click.stop="void selectObject(group.id)"
+          @mouseenter="hoverId = group.id"
+          @mouseleave="hoverId = null"
         >
           <title>{{ titleOf(group) }}</title>
           <rect :x="-group.width / 2" :y="-BOX_HEIGHT / 2" :width="group.width" :height="BOX_HEIGHT" rx="6" />
@@ -520,7 +539,7 @@ function onFit(): void {
             :key="edge.key"
             :d="edge.d"
             class="support"
-            :class="{ warn: showIssues && edge.issues.length > 0 }"
+            :class="{ warn: showIssues && edge.issues.length > 0, hover: hover.keys.has(edge.key) }"
             :data-from="edge.from"
             :data-to="edge.to"
           >
@@ -539,6 +558,8 @@ function onFit(): void {
           :transform="`translate(${group.x},${group.y})`"
           :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
           @click.stop="void selectObject(group.id)"
+          @mouseenter="hoverId = group.id"
+          @mouseleave="hoverId = null"
         >
           <title>{{ titleOf(group) }}</title>
           <circle :r="NODE_RADIUS" />
@@ -549,12 +570,19 @@ function onFit(): void {
             v-for="tp in group.drawnTps"
             :key="tp.id"
             class="node tp"
-            :class="{ selected: tp.id === selectedId, [`diff-${tp.diff}`]: Boolean(tp.diff) }"
+            :class="{
+              selected: tp.id === selectedId,
+              hover: tp.id === hoverId,
+              peer: hover.peers.has(tp.id),
+              [`diff-${tp.diff}`]: Boolean(tp.diff),
+            }"
             :data-id="tp.id"
             :data-node="group.id"
             :transform="`translate(${tp.x},${group.y + TP_Y})`"
             :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
             @click.stop="void selectObject(tp.id)"
+            @mouseenter="hoverId = tp.id"
+            @mouseleave="hoverId = null"
           >
             <title>{{ group.name }}:{{ tp.name }}</title>
             <circle :r="TP_RADIUS" />
@@ -628,8 +656,10 @@ function onFit(): void {
   stroke: var(--trace);
   stroke-width: 2.5;
 }
-.dependency-svg .support:hover {
+.dependency-svg .support:hover,
+.dependency-svg .support.hover {
   stroke: currentColor;
+  stroke-width: 2.5;
 }
 .dependency-svg .node {
   cursor: pointer;
@@ -726,7 +756,14 @@ function onFit(): void {
   stroke-width: 4;
   stroke-dasharray: none;
 }
-.dependency-svg .node:hover circle {
+.dependency-svg .node:hover circle,
+.dependency-svg .node.hover circle,
+.dependency-svg .node.peer circle {
+  stroke: currentColor;
+  stroke-width: 3;
+}
+.dependency-svg .group.hover rect,
+.dependency-svg .group.peer rect {
   stroke: currentColor;
   stroke-width: 3;
 }
@@ -735,7 +772,10 @@ function onFit(): void {
   opacity: 0.2;
 }
 .dependency-svg .node:hover,
-.dependency-svg .support:hover {
+.dependency-svg .node.hover,
+.dependency-svg .node.peer,
+.dependency-svg .support:hover,
+.dependency-svg .support.hover {
   opacity: 1;
 }
 </style>

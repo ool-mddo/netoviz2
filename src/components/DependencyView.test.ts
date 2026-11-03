@@ -105,6 +105,25 @@ describe('DependencyView', () => {
     expect(q(wrapper, 'path.support')[0]?.getAttribute('d')).not.toContain('C')
   })
 
+  it('highlights the supports of the hovered node and the node at the other end', async () => {
+    const { wrapper } = await mountView('layer2/r1')
+    current = wrapper
+    await wrapper.get('g.node[data-id="layer2/r1"]').trigger('mouseenter')
+    expect(wrapper.get('path.support').classes()).toContain('hover')
+    expect(wrapper.get('g.node[data-id="layer1/sw1"]').classes()).toContain('peer')
+    await wrapper.get('g.node[data-id="layer2/r1"]').trigger('mouseleave')
+    expect(wrapper.get('path.support').classes()).not.toContain('hover')
+    expect(wrapper.get('g.node[data-id="layer1/sw1"]').classes()).not.toContain('peer')
+  })
+
+  it('highlights the supports of the hovered term-point and the term-point at the other end', async () => {
+    const { wrapper } = await mountView('layer2/r1/e1')
+    current = wrapper
+    await wrapper.get('g.node.tp[data-id="layer2/r1/e1"]').trigger('mouseenter')
+    expect(wrapper.get('path.support').classes()).toContain('hover')
+    expect(wrapper.get('g.node.tp[data-id="layer1/sw1/p1"]').classes()).toContain('peer')
+  })
+
   it('adds the term-points of the selected node with the checkbox', async () => {
     const { wrapper } = await mountView('layer2/r1')
     current = wrapper
