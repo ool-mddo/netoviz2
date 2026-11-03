@@ -27,12 +27,14 @@ npm run build        # dist/ (静的ファイル。/netoviz2/ 配下で配信す
 ## コンテナ
 
 `Dockerfile` は、ビルドした静的ファイルを nginx で `/netoviz2/` 配下に配信するイメージを作る (ランタイムの Node は含まない。volume も持たない)。
-playground の `docker-compose.yaml` の `netoviz2` サービスとして起動し、api-proxy (nginx) の `/netoviz2/` から転送される。
+playground の `docker-compose.yaml` の `netoviz2` サービスとして起動し、api-proxy (nginx) の `/netoviz2/` から転送される。イメージは CI が作る (`ghcr.io/ool-mddo/netoviz2:<ブランチ名>`)。
 
 ```bash
 # playground のディレクトリで
-docker compose up -d --build netoviz2 api-proxy
+docker compose pull netoviz2        # CI が作ったイメージ (.env の NETOVIZ2_IMAGE_TAG)
+docker compose up -d netoviz2 api-proxy
 # http://localhost:15000/netoviz2/
+# 手元のソースでイメージを作って試すときは、docker build -t ghcr.io/ool-mddo/netoviz2:<タグ> repos/netoviz2
 ```
 
 ## 構成
@@ -40,11 +42,11 @@ docker compose up -d --build netoviz2 api-proxy
 ```
 src/
   api/          netomox-exp の netoviz2 API の型とクライアント (ETag 対応)
-  domain/       Viewer に依存しない純粋なロジック (support 索引・トレース、リンクの束ね、グラフ構築、diff data)
+  domain/       Viewer に依存しない純粋なロジック (support 索引・トレース・support のチェック、リンクの束ね、グラフ構築、diff data)
   stores/       Pinia: topology (summary・レイヤ・supports・属性、ETag による更新)、selection (選択とトレース)、view (展開状態)
   composables/  選択処理 (useSelect)、ポーリング (usePolling)
   render/       描画 (ForceRenderer: d3-force + SVG。Vue のリアクティブ機構を通さず DOM を直接更新)
-  components/   ForceView, AttributePanel, JsonTree, LayerList, SummaryBar
+  components/   ForceView (トポロジ), DependencyView (選択したオブジェクトの依存ツリー), AttributePanel, JsonTree, LayerList, SummaryBar, ViewToolbar
   views/        HomeView (一覧), TopologyView (表示)
 ```
 

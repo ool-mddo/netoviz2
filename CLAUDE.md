@@ -17,9 +17,9 @@ ool-mddo の汎用トポロジビューワー (Vite + Vue 3 + TypeScript の SPA
 
 ## 動作確認
 
-- 開発サーバ: `npm run dev` (`/topologies` は api-proxy (既定 `http://localhost:15000`) へプロキシ)。コンテナ: playground で `docker compose up -d --build netoviz2 api-proxy` → `http://localhost:15000/netoviz2/`。
+- 開発サーバ: `npm run dev` (`/topologies` は api-proxy (既定 `http://localhost:15000`) へプロキシ)。コンテナ: CI が作ったイメージを playground で `docker compose pull netoviz2 && docker compose up -d netoviz2 api-proxy` → `http://localhost:15000/netoviz2/` (`v0.1.0-dev` は同じタグを上書きするので pull が必要)。
 - ヘッドレス Chrome の `--screenshot --virtual-time-budget` では force-simulation が数ティックしか動かない (`requestAnimationFrame` が進まない)。実時間で待って確認する (DevTools Protocol で操作・評価・撮影)。
-- 状態は URL で指定できる: `?layers=<layer ID,...>&sel=<object ID>`。
+- 状態は URL で指定できる: `?layers=<layer ID,...>&sel=<object ID>&layout=<stress|force>&dependency=1`。
 
 ## コマンド
 
