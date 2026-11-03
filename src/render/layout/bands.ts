@@ -23,7 +23,7 @@ export const DEFAULT_BAND_OPTIONS: BandOptions = { gap: 40, bandSpacing: 140 }
 
 export interface BandLayout {
   positions: Positions
-  /** Vertical center of each layer */
+  /** Vertical center of each layer (the top layer is 0, the lower layers have larger values) */
   bandY: Map<string, number>
   /** Horizontal extent of the nodes (for the width of the bands) */
   minX: number
@@ -58,7 +58,8 @@ export function layoutBands(
   const bottomUp = [...layers].reverse()
 
   bottomUp.forEach((layer, row) => {
-    const y = row * options.bandSpacing
+    // the top layer is at y = 0 and the lower layers are below (y grows downward)
+    const y = (layers.length - 1 - row) * options.bandSpacing
     bandY.set(layer.id, y)
     const wanted = layer.nodes.map((node) => ({ node, x: wantedX(lowerOf.get(node.id), positions) }))
     const placed = wanted.filter((item) => item.x !== undefined)

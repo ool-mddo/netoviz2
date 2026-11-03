@@ -32,10 +32,10 @@ describe('layoutBands', () => {
     { id: 'l2', nodes: [node('x'), node('y'), node('z')] },
   ]
 
-  it('puts the lowest layer at row 0 in the order of the names, and the upper layers above', () => {
+  it('puts the top layer at y = 0 and the lower layers below, the lowest layer in the order of the names', () => {
     const { positions, bandY } = layoutBands(layers, [], OPTS)
-    expect(bandY.get('l2')).toBe(0)
-    expect(bandY.get('l3')).toBe(100)
+    expect(bandY.get('l3')).toBe(0)
+    expect(bandY.get('l2')).toBe(100)
     expect(positions.get('x')?.x).toBeLessThan(positions.get('y')?.x ?? 0)
     expect(positions.get('y')?.x).toBeLessThan(positions.get('z')?.x ?? 0)
   })
