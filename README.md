@@ -19,6 +19,49 @@ npm run lint
 npm run build        # dist/ (静的ファイル。/netoviz2/ 配下で配信する)
 ```
 
+## 手動での動作確認
+
+ソースを直しながら画面で確認する方法は 3 つある。**コンテナ (nginx の静的配信) は、ソースを mount しておらず、修正を自動では反映しない** (netoviz のようなホットリロードはない)。修正中は 1 の開発サーバを使う。
+
+前提: playground が起動していて (`docker compose up -d`)、確認したいトポロジが netomox-exp にあること。表示するデータ (API) はいずれも、api-proxy (`http://localhost:15000`) 経由で netomox-exp から取る。
+
+### 1. 開発サーバ (修正中の確認。保存すると自動でブラウザが更新される)
+
+```bash
+cd repos/netoviz2
+npm install                      # 初回のみ
+npm run dev                      # → http://localhost:5173/netoviz2/ (ポートが使用中なら別のポート。起動時の表示を見る)
+# api-proxy が別のホスト/ポートのときは、API の転送先を指定する
+NETOVIZ2_API_URL=http://<host>:15000 npm run dev
+```
+
+* ソースの保存で、ブラウザが自動で更新される (HMR)。API は同じオリジンの `/topologies/...` として、開発サーバから `NETOVIZ2_API_URL` へ転送される。
+* 表示の例 (`<network>` / `<snapshot>` は `http://localhost:15000/topologies/index` で確認できる):
+  * 一覧: `http://localhost:5173/netoviz2/`
+  * トポロジ: `http://localhost:5173/netoviz2/<network>/<snapshot>`
+  * 状態は URL で指定できる: `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force>&dependency=1` (ID は URL エンコードする)。
+
+### 2. 手元のソースでコンテナを作って確認する (コンテナで動く状態の確認)
+
+```bash
+# リポジトリのルートで、CI と同じタグでイメージを作る (.env の NETOVIZ2_IMAGE_TAG と同じタグ)
+docker build -t ghcr.io/ool-mddo/netoviz2:v0.1.0-dev repos/netoviz2
+# playground のディレクトリで、pull せずに作り直す (pull すると CI のイメージで上書きされる)
+docker compose up -d --force-recreate netoviz2 api-proxy
+# → http://localhost:15000/netoviz2/
+```
+
+* 修正のたびに `docker build` からやり直す (自動では反映されない)。ブラウザに古い JS が残るときは強制再読み込み (Ctrl+Shift+R)。
+* 元に戻す (CI のイメージを使う) ときは `docker compose pull netoviz2 && docker compose up -d netoviz2`。
+
+### 3. CI が作ったイメージで確認する
+
+push すると CI が `ghcr.io/ool-mddo/netoviz2:<ブランチ名>` を作る。`.env` の `NETOVIZ2_IMAGE_TAG` をそのブランチ名にして、`docker compose pull netoviz2 && docker compose up -d netoviz2`。同じタグの間は上書きされるので、更新後は pull が必要。
+
+### 画面を自動で確認するとき
+
+ヘッドレス Chrome の `--screenshot --virtual-time-budget` では `requestAnimationFrame` が進まず、レイアウト (force-simulation) が数ティックしか動かない。実時間で待つこと (DevTools Protocol でページを開き、待って、評価し、撮影する)。
+
 ## URL
 
 - `/netoviz2/` : network / snapshot 一覧
