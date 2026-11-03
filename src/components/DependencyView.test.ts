@@ -55,10 +55,10 @@ describe('DependencyView', () => {
     expect(q(wrapper, 'g.node')).toHaveLength(0)
   })
 
-  it('shows the supports of the selected node and all its term-points, the upper layer above the lower one', async () => {
+  it('shows the supports of the selected node (nodes only), the upper layer above the lower one', async () => {
     const { wrapper } = await mountView('layer2/r1')
     current = wrapper
-    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1', 'layer2/r1/e1'])
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1'])
     expect(q(wrapper, 'g.band')).toHaveLength(2)
     const lines = q(wrapper, 'path.support')
     expect(lines).toHaveLength(1)
@@ -69,16 +69,15 @@ describe('DependencyView', () => {
       return Number(/,(-?[\d.]+)\)/.exec(t ?? '')?.[1])
     }
     expect(y('layer2/r1')).toBeLessThan(y('layer1/sw1'))
-    expect(wrapper.get('g.group[data-id="layer2/r1"]').classes()).toContain('selected')
-    // only nodes with term-points are boxes (sw1 has term-points but they are not in the tree)
-    expect(q(wrapper, 'g.group')).toHaveLength(1)
+    expect(wrapper.get('g.node[data-id="layer2/r1"]').classes()).toContain('selected')
+    // nodes without term-points in the tree are not boxes
+    expect(q(wrapper, 'g.group')).toHaveLength(0)
   })
 
   it('shows the objects supported by the selected node (the upper layers)', async () => {
     const { wrapper } = await mountView('layer1/sw1')
     current = wrapper
-    // sw1 is shown with all its term-points
-    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer1/sw1/p1', 'layer1/sw1/p2', 'layer2/r1'])
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1'])
   })
 
   it('does not show the objects which are not related to the selected one', async () => {
@@ -98,13 +97,6 @@ describe('DependencyView', () => {
     expect(q(wrapper, 'path.support')).toHaveLength(1)
     // a term-point has no choice of the term-points
     expect(wrapper.find('[data-testid=with-tps]').exists()).toBe(false)
-  })
-
-  it('shows all the term-points of the selected node even if they have no supports', async () => {
-    mocked.getSupports.mockResolvedValue({ etag: 'v1-1', supports: [] })
-    const { wrapper } = await mountView('layer2/r1')
-    current = wrapper
-    expect(ids(wrapper)).toEqual(['layer2/r1', 'layer2/r1/e1'])
   })
 
   it('draws a support between adjacent layers as a straight line', async () => {
@@ -156,7 +148,7 @@ describe('DependencyView', () => {
     const { wrapper } = await mountView('layer2/r1', ['layer2'])
     current = wrapper
     expect(mocked.getLayer).toHaveBeenCalledWith('nw', 'ss', 'layer1')
-    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1', 'layer2/r1/e1'])
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1'])
   })
 
   it('says that a link has no dependency tree', async () => {
@@ -169,10 +161,10 @@ describe('DependencyView', () => {
   it('selects another object by a click (to follow the dependencies)', async () => {
     const { wrapper, selection } = await mountView('layer2/r1')
     current = wrapper
-    await wrapper.get('[data-id="layer1/sw1"]').trigger('click')
+    await wrapper.get('g.node[data-id="layer1/sw1"]').trigger('click')
     await flushPromises()
     expect(selection.selectedId).toBe('layer1/sw1')
-    expect(wrapper.get('[data-id="layer1/sw1"]').classes()).toContain('selected')
+    expect(wrapper.get('g.node[data-id="layer1/sw1"]').classes()).toContain('selected')
   })
 
   it('marks and lists the problems of the shown objects', async () => {
@@ -180,7 +172,7 @@ describe('DependencyView', () => {
     // r1 is in the layer which declares the lower layer but nothing supports it
     const { wrapper } = await mountView('layer2/r1')
     current = wrapper
-    expect(wrapper.get('g.group[data-id="layer2/r1"]').classes()).toContain('warn')
+    expect(wrapper.get('g.node[data-id="layer2/r1"]').classes()).toContain('warn')
     const count = wrapper.get('[data-testid=issue-count]')
     expect(count.text()).toMatch(/1 warn/)
     await count.trigger('click')
@@ -199,6 +191,6 @@ describe('DependencyView', () => {
     const { wrapper } = await mountView('layer2/r1')
     current = wrapper
     await wrapper.get('[data-testid=show-issues]').setValue(false)
-    expect(wrapper.get('g.group[data-id="layer2/r1"]').classes()).not.toContain('warn')
+    expect(wrapper.get('g.node[data-id="layer2/r1"]').classes()).not.toContain('warn')
   })
 })

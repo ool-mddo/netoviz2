@@ -147,18 +147,6 @@ const groups = computed<Group[] | null>(() => {
       group.tps.push({ id, name: entry.data.name, diff: entry.data.diff })
     }
   }
-  // all the term-points of the selected node are shown (even those without supports)
-  const entry = target.value
-  if (entry?.type === 'node') {
-    const group = groupOf(entry.data.id, entry.layer)
-    if (group) {
-      group.nodeTraced = true
-      for (const tp of topology.tpsOfNode.get(entry.data.id) ?? []) {
-        if (!group.tps.some((item) => item.id === tp.id))
-          group.tps.push({ id: tp.id, name: tp.name, diff: tp.diff })
-      }
-    }
-  }
   return [...map.values()]
 })
 const groupByObject = computed(() => {
