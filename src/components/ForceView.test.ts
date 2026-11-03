@@ -166,9 +166,13 @@ describe('ForceView', () => {
       current = wrapper
       const select = wrapper.get('[data-testid=layout-select]')
       expect((select.element as HTMLSelectElement).value).toBe('force')
-      expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual(['force', 'stress'])
+      expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual([
+        'force',
+        'stress',
+        'dependency',
+      ])
       await select.setValue('stress')
-      expect(wrapper.emitted('update:engine')?.[0]).toEqual(['stress'])
+      expect(wrapper.emitted('update:view')?.[0]).toEqual(['stress'])
     })
 
     it('shows the quality of the layout (time, crossings, overlaps)', async () => {

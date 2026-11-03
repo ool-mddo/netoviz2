@@ -257,6 +257,22 @@ describe('TopologyView', () => {
       expect(router.currentRoute.value.query.layout).toBeUndefined()
     })
 
+    it('shows the layer bands next to the graph (?compare=dependency)', async () => {
+      const wrapper = await mountView('/nw/ss?compare=dependency')
+      expect(svgCount(wrapper)).toBe(1)
+      expect(wrapper.findAll('[data-testid=dependency-view]')).toHaveLength(1)
+      expect(selected(wrapper)).toEqual(['stress', 'dependency'])
+    })
+
+    it('puts the layer bands into the URL when chosen', async () => {
+      const wrapper = await mountView('/nw/ss')
+      await wrapper.get('[data-testid=layout-select]').setValue('dependency')
+      await flushPromises()
+      expect(router.currentRoute.value.query.layout).toBe('dependency')
+      expect(wrapper.findAll('[data-testid=dependency-view]')).toHaveLength(1)
+      expect(svgCount(wrapper)).toBe(0)
+    })
+
     it('shares the selection between the two views', async () => {
       mocked.getSupports.mockResolvedValue(supportsData)
       mocked.getAttributes.mockResolvedValue(attributesData)

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AttributePanel from '../components/AttributePanel.vue'
+import DependencyView from '../components/DependencyView.vue'
 import ForceView from '../components/ForceView.vue'
 import LayerList from '../components/LayerList.vue'
 import SummaryBar from '../components/SummaryBar.vue'
@@ -9,7 +10,7 @@ import ViewToolbar from '../components/ViewToolbar.vue'
 import { usePolling } from '../composables/usePolling'
 import { useSelect } from '../composables/useSelect'
 import { defaultVisibleLayers } from '../domain/layers'
-import { DEFAULT_LAYOUT_ENGINE, parseLayoutEngine, type LayoutEngine } from '../render/layout/types'
+import { DEFAULT_VIEW_KIND, engineOf, parseViewKind, type ViewKind } from '../domain/viewKind'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 
@@ -83,23 +84,30 @@ async function reload(): Promise<void> {
 usePolling(reload, RELOAD_INTERVAL_MS)
 
 /**
- * Layout engines are kept in the URL (`?layout=<engine>&compare=<engine>`) to compare them:
- * `layout` is the engine of the (left) view and `compare` is the engine of the other view (shown side by side).
+ * View kinds are kept in the URL (`?layout=<kind>&compare=<kind>`) to compare them:
+ * `layout` is the kind of the (left) view and `compare` is the kind of the other view (shown side by side).
+ * A kind is a layout engine (force, stress) or the layer bands (dependency).
  */
-const engineA = computed<LayoutEngine>(() => parseLayoutEngine(route.query.layout) ?? DEFAULT_LAYOUT_ENGINE)
-const engineB = computed<LayoutEngine | null>(() => parseLayoutEngine(route.query.compare) ?? null)
+const kindA = computed<ViewKind>(() => parseViewKind(route.query.layout) ?? DEFAULT_VIEW_KIND)
+const kindB = computed<ViewKind | null>(() => parseViewKind(route.query.compare) ?? null)
 
-function setEngineQuery(key: 'layout' | 'compare', engine: LayoutEngine | null): void {
+function setKindQuery(key: 'layout' | 'compare', kind: ViewKind | null): void {
   const query = { ...route.query }
-  if (engine === null || (key === 'layout' && engine === DEFAULT_LAYOUT_ENGINE)) delete query[key]
-  else query[key] = engine
+  if (kind === null || (key === 'layout' && kind === DEFAULT_VIEW_KIND)) delete query[key]
+  else query[key] = kind
   void router.replace({ query })
 }
-/** Compare with the other engine */
+/** Compare with the other kind (force and stress with each other, otherwise with stress) */
 function setCompare(on: boolean): void {
-  const other: LayoutEngine = engineA.value === 'stress' ? 'force' : 'stress'
-  setEngineQuery('compare', on ? other : null)
+  const other: ViewKind = kindA.value === 'stress' ? 'force' : 'stress'
+  setKindQuery('compare', on ? other : null)
 }
+
+/** Panels to show: the left one, and the right one to compare */
+const panes = computed<{ key: 'layout' | 'compare'; kind: ViewKind }[]>(() => [
+  { key: 'layout', kind: kindA.value },
+  ...(kindB.value ? [{ key: 'compare' as const, kind: kindB.value }] : []),
+])
 
 /** Show all the layers, or none of them (to pick up one layer, clear all and choose it) */
 function setAllLayers(all: boolean): void {
@@ -135,23 +143,21 @@ onBeforeUnmount(() => selection.select(null))
         />
       </aside>
       <section class="viewer" data-testid="viewer">
-        <ViewToolbar
-          :visible-layers="visibleLayers"
-          :compare="engineB !== null"
-          @update:compare="setCompare"
-        />
-        <div class="panels" :class="{ compare: engineB !== null }">
-          <ForceView
-            :visible-layers="visibleLayers"
-            :engine="engineA"
-            @update:engine="(engine) => setEngineQuery('layout', engine)"
-          />
-          <ForceView
-            v-if="engineB"
-            :visible-layers="visibleLayers"
-            :engine="engineB"
-            @update:engine="(engine) => setEngineQuery('compare', engine)"
-          />
+        <ViewToolbar :visible-layers="visibleLayers" :compare="kindB !== null" @update:compare="setCompare" />
+        <div class="panels" :class="{ compare: kindB !== null }">
+          <template v-for="pane in panes" :key="pane.key">
+            <ForceView
+              v-if="engineOf(pane.kind)"
+              :visible-layers="visibleLayers"
+              :engine="engineOf(pane.kind)!"
+              @update:view="(kind) => setKindQuery(pane.key, kind)"
+            />
+            <DependencyView
+              v-else
+              :visible-layers="visibleLayers"
+              @update:view="(kind) => setKindQuery(pane.key, kind)"
+            />
+          </template>
         </div>
       </section>
       <AttributePanel />
