@@ -56,6 +56,7 @@ src/
 
 - force-simulation 表示 (ノード単位。ダブルクリックで term-point を展開)
 - **レイアウトエンジン**: stress (自前のストレス最小化。既定) と force (d3-force) を切り替えられる (`?layout=<engine>`)。「Compare layouts」で 2 つを左右に並べて比較できる (`?compare=<engine>`。選択・ホバー・トレースは共有)。各パネルに所要時間・リンクの交差数・ノードの重なりを表示する。設計と検討の経緯 (ELK を採用しなかった理由を含む) は playground の `docs/design_notes/netoviz2_layout.md`
+- **dependency (レイヤ帯) 表示**: `?layout=dependency` (または `compare=dependency` で force / stress と並べる)。レイヤを帯 (上位が上) にして、support を帯の間の線で描く。下位レイヤのノードの位置に上位レイヤのノードを揃えるので、線がほぼ垂直になり、交差や斜めの線は想定外の support を示す。レイヤをまたぐ関係の設定ミスを見つけるデバッグ用途の表示で、「Mark problems」で次を印付けして一覧する (`problems` ボタン。項目のクリックでノードを選択): 下位ノードに支えられていないノード (`unsupported`)・上位から使われていないノード (`unused`)・ノードの support がなく term-point の support だけがある (`tp-only`)・同じレイヤ内や上位から下位でない support (`same-layer` / `inverted`)・宣言されていないレイヤ間の support (`undeclared`)・宣言されているのに support がない (`no-support`)。表示中のレイヤだけが対象
 - レイヤの表示切替 (チェックボックス。「Select all / Clear all」で全選択・全解除。1 つのレイヤに着目するときは、全解除してから選ぶ)、networks flags / diff / 警告の表示
 - オブジェクトの選択 → support のトレース (上位/下位レイヤ) を強調、右パネルに属性・diff を表示
 - 5 秒ごとに ETag を確認し、トポロジが更新されたら自動で再読込

@@ -84,7 +84,8 @@ const report = computed(() => {
 const layout = computed(() => {
   if (!ready.value) return null
   const longest = Math.max(1, ...[...nodeById.value.values()].map((node) => node.name.length))
-  const gap = Math.min(140, Math.max(DEFAULT_BAND_OPTIONS.gap, longest * LABEL_CHAR_WIDTH + 12))
+  // labels are put in 2 rows alternately, so a label may be as wide as 2 gaps
+  const gap = Math.min(90, Math.max(DEFAULT_BAND_OPTIONS.gap, (longest * LABEL_CHAR_WIDTH) / 2 + 8))
   return layoutBands(
     layers.value.map((layer) => ({ id: layer.id, nodes: nodesOfLayer.value[layer.id] ?? [] })),
     (report.value?.pairs ?? []).map((pair) => ({ from: pair.from, to: pair.to })),
@@ -100,14 +101,26 @@ interface DrawnNode {
   y: number
   diff?: string
   issues: Issue<string>[]
+  /** Row of the label (neighbors in a band have labels in different rows) */
+  labelRow: number
 }
 const drawnNodes = computed<DrawnNode[]>(() => {
   const l = layout.value
   if (!l) return []
-  return [...nodeById.value.values()].flatMap((node) => {
+  const nodes = [...nodeById.value.values()].flatMap((node) => {
     const p = l.positions.get(node.id)
-    return p ? [{ ...node, x: p.x, y: p.y, issues: report.value?.nodeIssues.get(node.id) ?? [] }] : []
+    return p
+      ? [{ ...node, x: p.x, y: p.y, issues: report.value?.nodeIssues.get(node.id) ?? [], labelRow: 0 }]
+      : []
   })
+  // alternate the rows of the labels in each band (from left to right)
+  const rowOfBand = new Map<string, number>()
+  for (const node of [...nodes].sort((a, b) => a.x - b.x)) {
+    const n = rowOfBand.get(node.layer) ?? 0
+    node.labelRow = n % 2
+    rowOfBand.set(node.layer, n + 1)
+  }
+  return nodes
 })
 const bands = computed(() => {
   const l = layout.value
@@ -357,7 +370,7 @@ function onFit(): void {
         >
           <title>{{ titleOf(node) }}</title>
           <circle :r="NODE_RADIUS" />
-          <text :y="NODE_RADIUS + 11" text-anchor="middle">{{ node.name }}</text>
+          <text :y="NODE_RADIUS + 11 + node.labelRow * 11" text-anchor="middle">{{ node.name }}</text>
         </g>
       </g>
     </svg>
@@ -379,9 +392,10 @@ function onFit(): void {
   max-height: 10rem;
   overflow: auto;
   margin: 0 0 0.25rem;
-  padding: 0.25rem 0.5rem 0.25rem 1.5rem;
+  padding: 0.25rem 0.5rem;
   border: 1px solid var(--border);
   font-size: 0.85em;
+  list-style: none;
 }
 .dependency-view .issue-list li.warn {
   color: var(--changed-text);
@@ -391,6 +405,7 @@ function onFit(): void {
 }
 .dependency-view .issue-list .link {
   all: unset;
+  display: block;
   cursor: pointer;
   text-decoration: underline;
 }
