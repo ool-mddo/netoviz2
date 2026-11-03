@@ -3,16 +3,19 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useSelect } from '../composables/useSelect'
 import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
-import type { ViewKind } from '../domain/viewKind'
-import ViewSelect from './ViewSelect.vue'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
-import type { LayoutEngine, LayoutStats } from '../render/layout/types'
+import {
+  LAYOUT_ENGINES,
+  parseLayoutEngine,
+  type LayoutEngine,
+  type LayoutStats,
+} from '../render/layout/types'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 import { useViewStore } from '../stores/view'
 
 const props = defineProps<{ visibleLayers: string[]; engine: LayoutEngine }>()
-const emit = defineEmits<{ 'update:view': [kind: ViewKind] }>()
+const emit = defineEmits<{ 'update:engine': [engine: LayoutEngine] }>()
 
 const topology = useTopologyStore()
 const selection = useSelectionStore()
@@ -104,12 +107,22 @@ const statsText = computed(() => {
   if (!s) return ''
   return `${s.ms} ms / crossings ${s.crossings} / overlap ${s.overlap.toFixed(1)} / ${s.nodes} nodes, ${s.links} links`
 })
+
+function onEngineChange(event: Event): void {
+  const engine = parseLayoutEngine((event.target as HTMLSelectElement).value)
+  if (engine) emit('update:engine', engine)
+}
 </script>
 
 <template>
   <div class="force-view" :data-engine="engine">
     <div class="toolbar">
-      <ViewSelect :kind="engine" @update:kind="(kind) => emit('update:view', kind)" />
+      <label>
+        Layout
+        <select :value="engine" data-testid="layout-select" @change="onEngineChange">
+          <option v-for="item in LAYOUT_ENGINES" :key="item.id" :value="item.id">{{ item.label }}</option>
+        </select>
+      </label>
       <button type="button" data-testid="fit" @click="renderer?.fit()">Fit</button>
       <span class="stats" data-testid="layout-stats" :data-engine="stats?.engine">{{
         arranging ? 'arranging...' : statsText

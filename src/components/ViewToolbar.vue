@@ -4,8 +4,8 @@ import { useSelectionStore, type TraceMode } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 import { useViewStore } from '../stores/view'
 
-const props = defineProps<{ visibleLayers: string[]; compare: boolean }>()
-const emit = defineEmits<{ 'update:compare': [on: boolean] }>()
+const props = defineProps<{ visibleLayers: string[]; dependency: boolean }>()
+const emit = defineEmits<{ 'update:dependency': [on: boolean] }>()
 
 const topology = useTopologyStore()
 const selection = useSelectionStore()
@@ -38,11 +38,11 @@ const traceModes: TraceMode[] = ['both', 'lower', 'upper', 'off']
     <label>
       <input
         type="checkbox"
-        :checked="compare"
-        data-testid="compare"
-        @change="emit('update:compare', ($event.target as HTMLInputElement).checked)"
+        :checked="dependency"
+        data-testid="dependency"
+        @change="emit('update:dependency', ($event.target as HTMLInputElement).checked)"
       />
-      Compare layouts
+      Dependency view
     </label>
     <span class="hint">click: select / double click: show or hide the term-points of the node</span>
   </div>

@@ -46,10 +46,14 @@ export function layoutBands(
   options: BandOptions = DEFAULT_BAND_OPTIONS,
 ): BandLayout {
   const lowerOf = new Map<string, string[]>()
+  const upperOf = new Map<string, string[]>()
   for (const edge of edges) {
-    const list = lowerOf.get(edge.from)
-    if (list) list.push(edge.to)
+    const lower = lowerOf.get(edge.from)
+    if (lower) lower.push(edge.to)
     else lowerOf.set(edge.from, [edge.to])
+    const upper = upperOf.get(edge.to)
+    if (upper) upper.push(edge.from)
+    else upperOf.set(edge.to, [edge.from])
   }
 
   const positions: Positions = new Map()
@@ -84,7 +88,7 @@ export function layoutBands(
       options.gap,
     )
     sortedPlaced.forEach((item, i) => positions.set(item.node.id, { x: xs[i] ?? 0, y }))
-    // nodes without supporting nodes below: at the right end (apart from the others)
+    // nodes without supporting nodes below: put at the right end for now (see below)
     let next = xs.length > 0 ? (xs[xs.length - 1] ?? 0) + options.gap * 2 : 0
     for (const item of sortedLoose) {
       positions.set(item.node.id, { x: next, y })
@@ -92,6 +96,37 @@ export function layoutBands(
       next += options.gap
     }
   })
+
+  // the nodes without supporting nodes which support some upper node: put them below the upper nodes
+  for (const layer of bottomUp.slice(1)) {
+    const attached = layer.nodes.filter(
+      (node) => floating.has(node.id) && wantedX(upperOf.get(node.id), positions) !== undefined,
+    )
+    if (attached.length === 0) continue
+    const attachedIds = new Set(attached.map((node) => node.id))
+    const items = layer.nodes
+      .map((node) => ({
+        node,
+        x: attachedIds.has(node.id)
+          ? (wantedX(upperOf.get(node.id), positions) as number)
+          : (positions.get(node.id)?.x ?? 0),
+      }))
+      // the nodes which are still floating (no upper node either) stay at the right end of the band
+      .filter((item) => attachedIds.has(item.node.id) || !floating.has(item.node.id))
+      .sort((a, b) => a.x - b.x || compareNames(a.node.name, b.node.name))
+    const xs = spaceOut(
+      items.map((item) => item.x),
+      options.gap,
+    )
+    const y = bandY.get(layer.id) ?? 0
+    items.forEach((item, i) => positions.set(item.node.id, { x: xs[i] ?? 0, y }))
+    // the others (no upper node either) are put at the right end of the band, apart from the others
+    let next = (xs[xs.length - 1] ?? 0) + options.gap * 2
+    for (const node of layer.nodes.filter((n) => floating.has(n.id) && !attachedIds.has(n.id))) {
+      positions.set(node.id, { x: next, y })
+      next += options.gap
+    }
+  }
 
   const xs = [...positions.values()].map((p: Position) => p.x)
   return {

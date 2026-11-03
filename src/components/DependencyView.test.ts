@@ -10,19 +10,22 @@ import DependencyView from './DependencyView.vue'
 vi.mock('../api/client')
 const mocked = vi.mocked(api)
 
-async function mountView(loadedLayers = ['layer1', 'layer2']) {
+async function mountView(selected: string | null = null, loadedLayers = ['layer1', 'layer2']) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const topology = useTopologyStore()
   await topology.open('nw', 'ss')
   await Promise.all(loadedLayers.map((id) => topology.loadLayer(id)))
+  await topology.ensureSupports()
+  const selection = useSelectionStore()
+  selection.select(selected)
   const wrapper = mount(DependencyView, {
     props: { visibleLayers: ['layer1', 'layer2'] },
     global: { plugins: [pinia] },
     attachTo: document.body,
   })
   await flushPromises()
-  return { wrapper, topology, selection: useSelectionStore() }
+  return { wrapper, topology, selection }
 }
 
 let current: ReturnType<typeof mount> | null = null
@@ -41,27 +44,26 @@ afterEach(() => {
 })
 
 const q = (wrapper: ReturnType<typeof mount>, selector: string) => wrapper.element.querySelectorAll(selector)
+const ids = (wrapper: ReturnType<typeof mount>) =>
+  [...q(wrapper, 'g.node')].map((el) => el.getAttribute('data-id')).sort()
 
 describe('DependencyView', () => {
-  it('draws a band for each layer and the nodes in the bands', async () => {
+  it('asks to select an object when nothing is selected', async () => {
     const { wrapper } = await mountView()
     current = wrapper
-    expect(q(wrapper, 'g.band')).toHaveLength(2)
-    expect(q(wrapper, 'g.node')).toHaveLength(3)
+    expect(wrapper.get('[data-testid=dependency-hint]').text()).toContain('Select a node or a term-point')
+    expect(q(wrapper, 'g.node')).toHaveLength(0)
   })
 
-  it('draws the supports between nodes (node supports and term-point supports are one line)', async () => {
-    const { wrapper } = await mountView()
+  it('shows the supports of the selected node (nodes only), the upper layer above the lower one', async () => {
+    const { wrapper } = await mountView('layer2/r1')
     current = wrapper
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1'])
+    expect(q(wrapper, 'g.band')).toHaveLength(2)
     const lines = q(wrapper, 'line.support')
     expect(lines).toHaveLength(1)
     expect(lines[0]?.getAttribute('data-from')).toBe('layer2/r1')
     expect(lines[0]?.getAttribute('data-to')).toBe('layer1/sw1')
-  })
-
-  it('puts the upper layer above the lower layer', async () => {
-    const { wrapper } = await mountView()
-    current = wrapper
     const y = (id: string) => {
       const t = (wrapper.element.querySelector(`g.node[data-id="${id}"]`) as SVGGElement).getAttribute(
         'transform',
@@ -69,59 +71,96 @@ describe('DependencyView', () => {
       return Number(/,(-?[\d.]+)\)/.exec(t ?? '')?.[1])
     }
     expect(y('layer2/r1')).toBeLessThan(y('layer1/sw1'))
+    expect(wrapper.get('g.node[data-id="layer2/r1"]').classes()).toContain('selected')
   })
 
-  it('waits for the layers and the supports (no problem is reported before that)', async () => {
-    const { wrapper } = await mountView(['layer1'])
+  it('shows the objects supported by the selected node (the upper layers)', async () => {
+    const { wrapper } = await mountView('layer1/sw1')
     current = wrapper
-    expect(q(wrapper, 'g.node')).toHaveLength(0)
-    expect(wrapper.find('[data-testid=issue-count]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Loading')
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1'])
   })
 
-  it('selects a node by a click and highlights the trace', async () => {
+  it('does not show the objects which are not related to the selected one', async () => {
+    const { wrapper } = await mountView('layer2/r1')
+    current = wrapper
+    expect(wrapper.find('g.node[data-id="layer1/sw2"]').exists()).toBe(false)
+  })
+
+  it('shows the term-points of a selected term-point with the names of their nodes', async () => {
+    const { wrapper } = await mountView('layer2/r1/e1')
+    current = wrapper
+    expect(ids(wrapper)).toEqual(['layer1/sw1/p1', 'layer2/r1/e1'])
+    expect(wrapper.get('g.node[data-id="layer2/r1/e1"]').text()).toContain('r1:e1')
+    expect(wrapper.get('g.node[data-id="layer1/sw1/p1"]').classes()).toContain('tp')
+    expect(q(wrapper, 'line.support')).toHaveLength(1)
+    // a term-point has no choice of the term-points
+    expect(wrapper.find('[data-testid=with-tps]').exists()).toBe(false)
+  })
+
+  it('adds the term-points of the selected node with the checkbox', async () => {
+    const { wrapper } = await mountView('layer2/r1')
+    current = wrapper
+    await wrapper.get('[data-testid=with-tps]').setValue(true)
+    await flushPromises()
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer1/sw1/p1', 'layer2/r1', 'layer2/r1/e1'])
+    expect(q(wrapper, 'line.support')).toHaveLength(2)
+  })
+
+  it('shows the tree when the object is selected after the view is shown', async () => {
     const { wrapper, selection } = await mountView()
     current = wrapper
-    await wrapper.get('g.node[data-id="layer2/r1"]').trigger('click')
+    selection.select('layer2/r1/e1')
     await flushPromises()
-    expect(selection.selectedId).toBe('layer2/r1')
-    expect(q(wrapper, 'g.node.selected')).toHaveLength(1)
-    expect(q(wrapper, 'g.node.traced').length).toBe(2)
-    expect(q(wrapper, 'line.support.traced')).toHaveLength(1)
-    // sw2 is not related to the selected node
-    expect(wrapper.get('g.node[data-id="layer1/sw2"]').classes()).toContain('dim')
+    expect(ids(wrapper)).toEqual(['layer1/sw1/p1', 'layer2/r1/e1'])
   })
 
-  it('marks the problems and lists them (sw2 supports nothing above)', async () => {
-    const { wrapper } = await mountView()
+  it('loads the layers of the traced objects (even if they are not shown in the topology view)', async () => {
+    const { wrapper } = await mountView('layer2/r1', ['layer2'])
     current = wrapper
-    expect(wrapper.get('g.node[data-id="layer1/sw2"]').classes()).toContain('info')
+    expect(mocked.getLayer).toHaveBeenCalledWith('nw', 'ss', 'layer1')
+    expect(ids(wrapper)).toEqual(['layer1/sw1', 'layer2/r1'])
+  })
+
+  it('says that a link has no dependency tree', async () => {
+    const { wrapper } = await mountView('layer1/~link/a')
+    current = wrapper
+    expect(wrapper.text()).toContain('Links have no dependency tree')
+    expect(q(wrapper, 'g.node')).toHaveLength(0)
+  })
+
+  it('selects another object by a click (to follow the dependencies)', async () => {
+    const { wrapper, selection } = await mountView('layer2/r1')
+    current = wrapper
+    await wrapper.get('g.node[data-id="layer1/sw1"]').trigger('click')
+    await flushPromises()
+    expect(selection.selectedId).toBe('layer1/sw1')
+    expect(wrapper.get('g.node[data-id="layer1/sw1"]').classes()).toContain('selected')
+  })
+
+  it('marks and lists the problems of the shown objects', async () => {
+    mocked.getSupports.mockResolvedValue({ etag: 'v1-1', supports: [] })
+    // r1 is in the layer which declares the lower layer but nothing supports it
+    const { wrapper } = await mountView('layer2/r1')
+    current = wrapper
+    expect(wrapper.get('g.node[data-id="layer2/r1"]').classes()).toContain('warn')
     const count = wrapper.get('[data-testid=issue-count]')
-    expect(count.text()).toMatch(/0 warn \/ 1 info/)
+    expect(count.text()).toMatch(/1 warn/)
     await count.trigger('click')
-    expect(wrapper.get('[data-testid=issue-list]').text()).toContain('unused')
+    expect(wrapper.get('[data-testid=issue-list]').text()).toContain('unsupported')
+  })
+
+  it('does not list the problems of the objects which are not shown', async () => {
+    // sw2 supports nothing above (a problem), but it is not in the tree of r1
+    const { wrapper } = await mountView('layer2/r1')
+    current = wrapper
+    expect(wrapper.get('[data-testid=issue-count]').text()).toMatch(/0 warn \/ 0 info/)
   })
 
   it('can hide the marks of the problems', async () => {
-    const { wrapper } = await mountView()
+    mocked.getSupports.mockResolvedValue({ etag: 'v1-1', supports: [] })
+    const { wrapper } = await mountView('layer2/r1')
     current = wrapper
     await wrapper.get('[data-testid=show-issues]').setValue(false)
-    expect(wrapper.get('g.node[data-id="layer1/sw2"]').classes()).not.toContain('info')
-  })
-
-  it('selects the node of an issue from the list', async () => {
-    const { wrapper, selection } = await mountView()
-    current = wrapper
-    await wrapper.get('[data-testid=issue-count]').trigger('click')
-    await wrapper.get('[data-testid=issue-list] button').trigger('click')
-    await flushPromises()
-    expect(selection.selectedId).toBe('layer1/sw2')
-  })
-
-  it('tells the change of the view', async () => {
-    const { wrapper } = await mountView()
-    current = wrapper
-    await wrapper.get('[data-testid=layout-select]').setValue('force')
-    expect(wrapper.emitted('update:view')?.[0]).toEqual(['force'])
+    expect(wrapper.get('g.node[data-id="layer2/r1"]').classes()).not.toContain('warn')
   })
 })

@@ -55,8 +55,8 @@ src/
 ## 機能 (MVP)
 
 - force-simulation 表示 (ノード単位。ダブルクリックで term-point を展開)
-- **レイアウトエンジン**: stress (自前のストレス最小化。既定) と force (d3-force) を切り替えられる (`?layout=<engine>`)。「Compare layouts」で 2 つを左右に並べて比較できる (`?compare=<engine>`。選択・ホバー・トレースは共有)。各パネルに所要時間・リンクの交差数・ノードの重なりを表示する。設計と検討の経緯 (ELK を採用しなかった理由を含む) は playground の `docs/design_notes/netoviz2_layout.md`
-- **dependency (レイヤ帯) 表示**: `?layout=dependency` (または `compare=dependency` で force / stress と並べる)。レイヤを帯 (上位が上) にして、support を帯の間の線で描く。下位レイヤのノードの位置に上位レイヤのノードを揃えるので、線がほぼ垂直になり、交差や斜めの線は想定外の support を示す。レイヤをまたぐ関係の設定ミスを見つけるデバッグ用途の表示で、「Mark problems」で次を印付けして一覧する (`problems` ボタン。項目のクリックでノードを選択): 下位ノードに支えられていないノード (`unsupported`)・上位から使われていないノード (`unused`)・ノードの support がなく term-point の support だけがある (`tp-only`)・同じレイヤ内や上位から下位でない support (`same-layer` / `inverted`)・宣言されていないレイヤ間の support (`undeclared`)・宣言されているのに support がない (`no-support`)。表示中のレイヤだけが対象
+- **レイアウトエンジン**: stress (自前のストレス最小化。既定) と force (d3-force) を切り替えられる (`?layout=<engine>`)。各パネルに所要時間・リンクの交差数・ノードの重なりを表示する。設計と検討の経緯 (ELK を採用しなかった理由を含む) は playground の `docs/design_notes/netoviz2_layout.md`
+- **dependency (レイヤ帯) 表示** (副画面): ツールバーの「Dependency view」(`?dependency=1`) でトポロジ表示の隣に出し入れする。**トポロジ表示で選択した node / term-point だけ**について、それを支えるオブジェクト (下位レイヤ) と、それが支えるオブジェクト (上位レイヤ) の依存関係ツリーを、レイヤの帯 (上位が上) に描く。term-point を選ぶと term-point の依存、node を選ぶと node の依存 (「Term-points」で、その node の term-point の依存も加える)。ツリーの中のオブジェクトをクリックすると、それを選択して辿れる (選択はトポロジ表示と共有)。support 先のないオブジェクトは帯の右端ではなく上位のオブジェクトの下に置く。レイヤをまたぐ関係の設定ミスを見つけるデバッグ用途で、「Mark problems」で次を印付けして一覧する (`problems` ボタン。項目のクリックでオブジェクトを選択。対象は表示中のツリーのオブジェクト): 下位ノードに支えられていないノード (`unsupported`)・上位から使われていないノード (`unused`)・ノードの support がなく term-point の support だけがある (`tp-only`)・同じレイヤ内や上位から下位でない support (`same-layer` / `inverted`)・宣言されていないレイヤ間の support (`undeclared`)・宣言されているのに support がない (`no-support`)
 - レイヤの表示切替 (チェックボックス。「Select all / Clear all」で全選択・全解除。1 つのレイヤに着目するときは、全解除してから選ぶ)、networks flags / diff / 警告の表示
 - オブジェクトの選択 → support のトレース (上位/下位レイヤ) を強調、右パネルに属性・diff を表示
 - 5 秒ごとに ETag を確認し、トポロジが更新されたら自動で再読込

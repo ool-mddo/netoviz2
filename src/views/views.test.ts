@@ -222,31 +222,6 @@ describe('TopologyView', () => {
       expect(svgCount(wrapper)).toBe(1)
     })
 
-    it('shows two views side by side with ?compare=', async () => {
-      const wrapper = await mountView('/nw/ss?compare=force')
-      expect(svgCount(wrapper)).toBe(2)
-      expect(selected(wrapper)).toEqual(['stress', 'force'])
-    })
-
-    it('starts the comparison with the toolbar (with force) and stops it', async () => {
-      const wrapper = await mountView('/nw/ss')
-      await wrapper.get('[data-testid=compare]').setValue(true)
-      await flushPromises()
-      expect(router.currentRoute.value.query.compare).toBe('force')
-      expect(svgCount(wrapper)).toBe(2)
-      await wrapper.get('[data-testid=compare]').setValue(false)
-      await flushPromises()
-      expect(router.currentRoute.value.query.compare).toBeUndefined()
-      expect(svgCount(wrapper)).toBe(1)
-    })
-
-    it('compares force with the stress layout', async () => {
-      const wrapper = await mountView('/nw/ss?layout=force')
-      await wrapper.get('[data-testid=compare]').setValue(true)
-      await flushPromises()
-      expect(router.currentRoute.value.query.compare).toBe('stress')
-    })
-
     it('puts the changed engine into the URL (the default engine is not put)', async () => {
       const wrapper = await mountView('/nw/ss')
       await wrapper.get('[data-testid=layout-select]').setValue('force')
@@ -256,29 +231,42 @@ describe('TopologyView', () => {
       await flushPromises()
       expect(router.currentRoute.value.query.layout).toBeUndefined()
     })
+  })
 
-    it('shows the layer bands next to the graph (?compare=dependency)', async () => {
-      const wrapper = await mountView('/nw/ss?compare=dependency')
-      expect(svgCount(wrapper)).toBe(1)
-      expect(wrapper.findAll('[data-testid=dependency-view]')).toHaveLength(1)
-      expect(selected(wrapper)).toEqual(['stress', 'dependency'])
-    })
+  describe('dependency view', () => {
+    const depCount = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.findAll('[data-testid=dependency-view]').length
 
-    it('puts the layer bands into the URL when chosen', async () => {
+    it('is hidden by default', async () => {
       const wrapper = await mountView('/nw/ss')
-      await wrapper.get('[data-testid=layout-select]').setValue('dependency')
-      await flushPromises()
-      expect(router.currentRoute.value.query.layout).toBe('dependency')
-      expect(wrapper.findAll('[data-testid=dependency-view]')).toHaveLength(1)
-      expect(svgCount(wrapper)).toBe(0)
+      expect(depCount(wrapper)).toBe(0)
     })
 
-    it('shares the selection between the two views', async () => {
+    it('is shown next to the topology view with ?dependency=1', async () => {
+      const wrapper = await mountView('/nw/ss?dependency=1')
+      expect(depCount(wrapper)).toBe(1)
+      expect(wrapper.findAll('[data-testid=force-svg]')).toHaveLength(1)
+    })
+
+    it('is toggled with the toolbar (and the URL)', async () => {
+      const wrapper = await mountView('/nw/ss')
+      await wrapper.get('[data-testid=dependency]').setValue(true)
+      await flushPromises()
+      expect(router.currentRoute.value.query.dependency).toBe('1')
+      expect(depCount(wrapper)).toBe(1)
+      await wrapper.get('[data-testid=dependency]').setValue(false)
+      await flushPromises()
+      expect(router.currentRoute.value.query.dependency).toBeUndefined()
+      expect(depCount(wrapper)).toBe(0)
+    })
+
+    it('shows the supports of the object selected in the topology view', async () => {
       mocked.getSupports.mockResolvedValue(supportsData)
       mocked.getAttributes.mockResolvedValue(attributesData)
-      const wrapper = await mountView('/nw/ss?layers=layer1,layer2&compare=force&sel=layer2%2Fr1')
-      const selected = wrapper.findAll('g.node.selected[data-id="layer2/r1"]')
-      expect(selected).toHaveLength(2)
+      const wrapper = await mountView('/nw/ss?layers=layer1,layer2&dependency=1&sel=layer2%2Fr1')
+      await flushPromises()
+      expect(wrapper.findAll('[data-testid=dependency-svg] g.node')).toHaveLength(2)
+      expect(wrapper.findAll('g.node.selected[data-id="layer2/r1"]').length).toBeGreaterThanOrEqual(2)
     })
   })
 

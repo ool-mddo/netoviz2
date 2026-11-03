@@ -10,7 +10,7 @@ import ViewToolbar from '../components/ViewToolbar.vue'
 import { usePolling } from '../composables/usePolling'
 import { useSelect } from '../composables/useSelect'
 import { defaultVisibleLayers } from '../domain/layers'
-import { DEFAULT_VIEW_KIND, engineOf, parseViewKind, type ViewKind } from '../domain/viewKind'
+import { DEFAULT_LAYOUT_ENGINE, parseLayoutEngine, type LayoutEngine } from '../render/layout/types'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 
@@ -84,30 +84,24 @@ async function reload(): Promise<void> {
 usePolling(reload, RELOAD_INTERVAL_MS)
 
 /**
- * View kinds are kept in the URL (`?layout=<kind>&compare=<kind>`) to compare them:
- * `layout` is the kind of the (left) view and `compare` is the kind of the other view (shown side by side).
- * A kind is a layout engine (force, stress) or the layer bands (dependency).
+ * The layout engine of the topology view is kept in the URL (`?layout=<engine>`).
+ * The dependency view (the supports of the selected object) is the secondary view: `?dependency=1` shows it.
  */
-const kindA = computed<ViewKind>(() => parseViewKind(route.query.layout) ?? DEFAULT_VIEW_KIND)
-const kindB = computed<ViewKind | null>(() => parseViewKind(route.query.compare) ?? null)
+const engine = computed<LayoutEngine>(() => parseLayoutEngine(route.query.layout) ?? DEFAULT_LAYOUT_ENGINE)
+const dependencyOn = computed(() => route.query.dependency === '1')
 
-function setKindQuery(key: 'layout' | 'compare', kind: ViewKind | null): void {
+function setEngine(next: LayoutEngine): void {
   const query = { ...route.query }
-  if (kind === null || (key === 'layout' && kind === DEFAULT_VIEW_KIND)) delete query[key]
-  else query[key] = kind
+  if (next === DEFAULT_LAYOUT_ENGINE) delete query.layout
+  else query.layout = next
   void router.replace({ query })
 }
-/** Compare with the other kind (force and stress with each other, otherwise with stress) */
-function setCompare(on: boolean): void {
-  const other: ViewKind = kindA.value === 'stress' ? 'force' : 'stress'
-  setKindQuery('compare', on ? other : null)
+function setDependency(on: boolean): void {
+  const query = { ...route.query }
+  if (on) query.dependency = '1'
+  else delete query.dependency
+  void router.replace({ query })
 }
-
-/** Panels to show: the left one, and the right one to compare */
-const panes = computed<{ key: 'layout' | 'compare'; kind: ViewKind }[]>(() => [
-  { key: 'layout', kind: kindA.value },
-  ...(kindB.value ? [{ key: 'compare' as const, kind: kindB.value }] : []),
-])
 
 /** Show all the layers, or none of them (to pick up one layer, clear all and choose it) */
 function setAllLayers(all: boolean): void {
@@ -143,21 +137,14 @@ onBeforeUnmount(() => selection.select(null))
         />
       </aside>
       <section class="viewer" data-testid="viewer">
-        <ViewToolbar :visible-layers="visibleLayers" :compare="kindB !== null" @update:compare="setCompare" />
-        <div class="panels" :class="{ compare: kindB !== null }">
-          <template v-for="pane in panes" :key="pane.key">
-            <ForceView
-              v-if="engineOf(pane.kind)"
-              :visible-layers="visibleLayers"
-              :engine="engineOf(pane.kind)!"
-              @update:view="(kind) => setKindQuery(pane.key, kind)"
-            />
-            <DependencyView
-              v-else
-              :visible-layers="visibleLayers"
-              @update:view="(kind) => setKindQuery(pane.key, kind)"
-            />
-          </template>
+        <ViewToolbar
+          :visible-layers="visibleLayers"
+          :dependency="dependencyOn"
+          @update:dependency="setDependency"
+        />
+        <div class="panels" :class="{ dependency: dependencyOn }">
+          <ForceView :visible-layers="visibleLayers" :engine="engine" @update:engine="setEngine" />
+          <DependencyView v-if="dependencyOn" :visible-layers="visibleLayers" />
         </div>
       </section>
       <AttributePanel />
@@ -177,7 +164,7 @@ onBeforeUnmount(() => selection.select(null))
   grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
 }
-.panels.compare {
+.panels.dependency {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .error {

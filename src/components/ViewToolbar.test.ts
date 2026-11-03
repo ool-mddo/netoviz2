@@ -7,13 +7,13 @@ import { PORTS_AUTO_LIMIT, useViewStore } from '../stores/view'
 import { layer1Data } from '../test/fixtures'
 import ViewToolbar from './ViewToolbar.vue'
 
-function setup(compare = false) {
+function setup(dependency = false) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const topology = useTopologyStore()
   topology.layerData = { layer1: layer1Data }
   const wrapper = mount(ViewToolbar, {
-    props: { visibleLayers: ['layer1'], compare },
+    props: { visibleLayers: ['layer1'], dependency },
     global: { plugins: [pinia] },
   })
   return { wrapper, topology, view: useViewStore(), selection: useSelectionStore() }
@@ -52,14 +52,14 @@ describe('ViewToolbar', () => {
     expect(selection.traceMode).toBe('lower')
   })
 
-  it('tells the change of the comparison', async () => {
+  it('tells the change of the dependency view', async () => {
     const { wrapper } = setup()
-    expect(box(wrapper, 'compare').checked).toBe(false)
-    await wrapper.get('[data-testid=compare]').setValue(true)
-    expect(wrapper.emitted('update:compare')?.[0]).toEqual([true])
+    expect(box(wrapper, 'dependency').checked).toBe(false)
+    await wrapper.get('[data-testid=dependency]').setValue(true)
+    expect(wrapper.emitted('update:dependency')?.[0]).toEqual([true])
   })
 
-  it('shows the comparison as on', () => {
-    expect(box(setup(true).wrapper, 'compare').checked).toBe(true)
+  it('shows the dependency view as on', () => {
+    expect(box(setup(true).wrapper, 'dependency').checked).toBe(true)
   })
 })

@@ -27,6 +27,23 @@ describe('spaceOut', () => {
 })
 
 describe('layoutBands', () => {
+  it('puts a node without a supporting node below the upper node which it supports', () => {
+    // t is supported by m only; m supports nothing below, but m is supported-by-nothing: m is below t
+    const three: BandLayer[] = [
+      { id: 'top', nodes: [node('t')] },
+      { id: 'mid', nodes: [node('m'), node('n')] },
+      { id: 'bot', nodes: [node('z'), node('y')] },
+    ]
+    const edges = [
+      { from: 't', to: 'm' },
+      { from: 'n', to: 'y' },
+    ]
+    const { positions, floating } = layoutBands(three, edges, OPTS)
+    expect(floating.has('m')).toBe(true)
+    // t has no lower node placed (m is loose): t is also at the right end, m is under t
+    expect(positions.get('m')?.x).toBe(positions.get('t')?.x)
+  })
+
   const layers: BandLayer[] = [
     { id: 'l3', nodes: [node('a'), node('b'), node('c')] },
     { id: 'l2', nodes: [node('x'), node('y'), node('z')] },
