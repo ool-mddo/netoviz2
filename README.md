@@ -35,11 +35,11 @@ npm run dev                      # → http://localhost:5173/netoviz2/ (ポー�
 NETOVIZ2_API_URL=http://<host>:15000 npm run dev
 ```
 
-* ソースの保存で、ブラウザが自動で更新される (HMR)。API は同じオリジンの `/topologies/...` として、開発サーバから `NETOVIZ2_API_URL` へ転送される。
-* 表示の例 (`<network>` / `<snapshot>` は `http://localhost:15000/topologies/index` で確認できる):
-  * 一覧: `http://localhost:5173/netoviz2/`
-  * トポロジ: `http://localhost:5173/netoviz2/<network>/<snapshot>`
-  * 状態は URL で指定できる: `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force>&dependency=1` (ID は URL エンコードする)。
+- ソースの保存で、ブラウザが自動で更新される (HMR)。API は同じオリジンの `/topologies/...` として、開発サーバから `NETOVIZ2_API_URL` へ転送される。
+- 表示の例 (`<network>` / `<snapshot>` は `http://localhost:15000/topologies/index` で確認できる):
+  - 一覧: `http://localhost:5173/netoviz2/`
+  - トポロジ: `http://localhost:5173/netoviz2/<network>/<snapshot>`
+  - 状態は URL で指定できる: `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force>&dependency=1` (ID は URL エンコードする)。
 
 ### 2. 手元のソースでコンテナを作って確認する (コンテナで動く状態の確認)
 
@@ -51,8 +51,8 @@ docker compose up -d --force-recreate netoviz2 api-proxy
 # → http://localhost:15000/netoviz2/
 ```
 
-* 修正のたびに `docker build` からやり直す (自動では反映されない)。ブラウザに古い JS が残るときは強制再読み込み (Ctrl+Shift+R)。
-* 元に戻す (CI のイメージを使う) ときは `docker compose pull netoviz2 && docker compose up -d netoviz2`。
+- 修正のたびに `docker build` からやり直す (自動では反映されない)。ブラウザに古い JS が残るときは強制再読み込み (Ctrl+Shift+R)。
+- 元に戻す (CI のイメージを使う) ときは `docker compose pull netoviz2 && docker compose up -d netoviz2`。
 
 ### 3. CI が作ったイメージで確認する
 
