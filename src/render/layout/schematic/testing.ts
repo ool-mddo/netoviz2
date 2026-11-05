@@ -1,7 +1,10 @@
+import { SupportIndex } from '../../../domain/supportIndex'
+import { mddoFwLayer, mddoFwSupports } from '../../../test/mddoFwStack'
 import { annotate } from './annotate'
+import { lowerClosure, lowerLayersOf, lowerNodesIn } from './inherit'
 import { parseProfiles } from './profile'
 import { assignSlots, type SlotLayout } from './slots'
-import type { DiagramProfile, SchematicNode } from './types'
+import type { DiagramProfile, SchematicBase, SchematicNode } from './types'
 
 /** Helpers for the tests of the schematic layout */
 
@@ -40,7 +43,7 @@ export function slotsOf(
   links: ReadonlyArray<{ source: string; target: string }> = [],
   profile: DiagramProfile = SITE_ROLE_PROFILE,
 ): SlotLayout {
-  return assignSlots(nodes, annotate(nodes, profile), links, profile)
+  return assignSlots(nodes, annotate(nodes, profile), links, { unclassifiedRow: profile.tiers.length })
 }
 
 /** Names in each group and row, e.g. `{ a: { 0: ['a-top-1'] } }` (a pair is joined by '+') */
@@ -60,4 +63,25 @@ export function namesOf(
       ),
     ]),
   )
+}
+
+/** The lower layers of a layer of mddo-fw (layer1 for layer2; layer2 and layer1 for layer3), as the bases to inherit from */
+export function mddoFwBasesOf(layer: 'layer2' | 'layer3'): SchematicBase[] {
+  const index = new SupportIndex(mddoFwSupports())
+  const layerIds = ['layer1', 'layer2', 'layer3']
+  const closure = lowerClosure(
+    index,
+    mddoFwLayer(layer).nodes.map((n) => n.id),
+  )
+  return lowerLayersOf(closure, layerIds)
+    .sort()
+    .map((baseLayer) => {
+      const base = mddoFwLayer(baseLayer as 'layer1' | 'layer2')
+      return {
+        layer: baseLayer,
+        nodes: base.nodes,
+        links: base.links,
+        lowerOf: lowerNodesIn(closure, baseLayer, layerIds),
+      }
+    })
 }

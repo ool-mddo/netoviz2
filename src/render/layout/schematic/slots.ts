@@ -1,6 +1,6 @@
 import { compareNames } from '../bands'
-import type { Annotated } from './annotate'
-import type { DiagramProfile, SchematicNode } from './types'
+import type { Annotated, NodeAnnotation } from './annotate'
+import type { SchematicNode } from './types'
 
 /** Nodes which are put side by side: a redundant pair (the primary first) or a single node */
 export interface SlotUnit {
@@ -21,11 +21,37 @@ export interface SlotGroup {
 export interface SlotLayout {
   /** Groups from the left */
   groups: SlotGroup[]
-  /** Rows which have nodes, from the top. A row is the index of the tier in the profile (nodes without a tier: tiers.length). */
+  /** Rows which have nodes, from the top. A row is the index of the tier; the nodes without a tier are in `unclassifiedRow`. */
   rows: number[]
 }
 
+export interface SlotOptions {
+  /** Row for the nodes without a tier (after the last tier) */
+  unclassifiedRow: number
+  /**
+   * Initial order of the nodes in a row (e.g. the x of the lower layer which they are inherited from). Without links
+   * the barycenter method does not change it: the arrangement is the same as the one of the lower layer.
+   */
+  hints?: ReadonlyMap<string, number>
+}
+
 const SWEEPS = 6
+
+/**
+ * Groups from the left: by the smallest order of the members (groups without order are after them, by name); the nodes
+ * which belong to no group ('') are the last.
+ */
+function rankGroups(annotations: Iterable<Pick<NodeAnnotation, 'group' | 'order'>>): string[] {
+  const orders = new Map<string, number>()
+  for (const { group = '', order = Number.POSITIVE_INFINITY } of annotations) {
+    orders.set(group, Math.min(orders.get(group) ?? Number.POSITIVE_INFINITY, order))
+  }
+  return [...orders.keys()].sort((a, b) => {
+    if ((a === '') !== (b === '')) return a === '' ? 1 : -1
+    const [oa, ob] = [orders.get(a) ?? Number.POSITIVE_INFINITY, orders.get(b) ?? Number.POSITIVE_INFINITY]
+    return oa === ob ? compareNames(a, b) : oa < ob ? -1 : 1
+  })
+}
 
 /**
  * Assign the nodes to the groups (by `order`), rows (by tier) and positions in the row. The order in a row is
@@ -35,26 +61,15 @@ export function assignSlots(
   nodes: readonly SchematicNode[],
   { annotations }: Annotated,
   links: ReadonlyArray<{ source: string; target: string }>,
-  profile: DiagramProfile,
+  { unclassifiedRow, hints }: SlotOptions,
 ): SlotLayout {
   const nameOf = new Map(nodes.map((node) => [node.id, node.name]))
-  const rowOf = (id: string) => annotations.get(id)?.tierIndex ?? profile.tiers.length
+  const rowOf = (id: string) => annotations.get(id)?.tierIndex ?? unclassifiedRow
   const groupOf = (id: string) => annotations.get(id)?.group ?? ''
 
-  // groups: by the smallest order of the members (groups without order are after them, by name); no group is the last
-  const groupKeys = [...new Set(nodes.map((node) => groupOf(node.id)))]
-  const orders = new Map<string, number>()
-  for (const node of nodes) {
-    const key = groupOf(node.id)
-    const order = annotations.get(node.id)?.order ?? Number.POSITIVE_INFINITY
-    orders.set(key, Math.min(orders.get(key) ?? Number.POSITIVE_INFINITY, order))
-  }
-  const groupOrder = (key: string) => orders.get(key) ?? Number.POSITIVE_INFINITY
-  groupKeys.sort((a, b) => {
-    if ((a === '') !== (b === '')) return a === '' ? 1 : -1
-    const [oa, ob] = [groupOrder(a), groupOrder(b)]
-    return oa === ob ? compareNames(a, b) : oa < ob ? -1 : 1
-  })
+  const groupKeys = rankGroups(
+    nodes.map((node) => ({ group: annotations.get(node.id)?.group, order: annotations.get(node.id)?.order })),
+  )
 
   // units: the pair members of the same group and row are one unit
   const unitOf = new Map<string, SlotUnit>()
@@ -84,9 +99,19 @@ export function assignSlots(
     const cells = groups[group]?.cells
     cells?.set(row, [...(cells.get(row) ?? []), unit])
   }
+  // initial order: the hints (the order of the lower layer) if given, otherwise the names
+  const hintOf = (unit: SlotUnit): number => {
+    if (!hints) return 0
+    const values = unit.ids.flatMap((id) => (hints.has(id) ? [hints.get(id)!] : []))
+    return values.length === 0 ? Number.POSITIVE_INFINITY : values.reduce((s, v) => s + v, 0) / values.length
+  }
   for (const group of groups) {
     for (const cell of group.cells.values()) {
-      cell.sort((a, b) => compareNames(nameOf.get(a.ids[0] ?? '') ?? '', nameOf.get(b.ids[0] ?? '') ?? ''))
+      cell.sort(
+        (a, b) =>
+          hintOf(a) - hintOf(b) ||
+          compareNames(nameOf.get(a.ids[0] ?? '') ?? '', nameOf.get(b.ids[0] ?? '') ?? ''),
+      )
     }
   }
 

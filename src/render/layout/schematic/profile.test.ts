@@ -52,6 +52,17 @@ describe('parseProfiles', () => {
     expect(warnings).toEqual(["unknown key 'axes' is ignored"])
   })
 
+  it('parses inherit (the layer to inherit from), and warns about a via other than supports', () => {
+    const { profiles, warnings } = parseProfiles('view: v\ninherit: { from: layer1, via: supports }\n')
+    expect(profiles[0]?.inherit).toEqual({ from: 'layer1' })
+    expect(warnings).toEqual([])
+    expect(parseProfiles('view: v\ninherit: { from: layer1, via: links }\n').warnings).toEqual([
+      "inherit: via 'links' is not supported (only supports)",
+    ])
+    expect(parseProfiles('view: v\n').profiles[0]?.inherit).toBeUndefined()
+    expect(() => parseProfiles('view: v\ninherit: {}\n')).toThrow(ProfileError)
+  })
+
   it('warns about unknown keys of target and pair (a typo of target would apply the profile to all the layers)', () => {
     const { warnings } = parseProfiles(
       "view: v\ntarget: { layers: layer1 }\nrules:\n  - { select: '*', pair: { by: i, primary: '1', second: '2' } }\n",

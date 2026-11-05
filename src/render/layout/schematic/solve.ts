@@ -13,6 +13,11 @@ export interface SolveOptions {
   /** Gap between the circles of rows */
   rowGap?: number
   iterations?: number
+  /**
+   * Positions (x) to start from, e.g. of the lower layer which the arrangement is inherited from. With `iterations: 0`
+   * the positions are kept as far as the order and the gaps allow (the links are not made straight).
+   */
+  initialX?: ReadonlyMap<string, number>
 }
 
 const DEFAULTS = { nodeGap: 40, pairGap: 40, groupGap: 120, rowGap: 90, iterations: 40 }
@@ -80,9 +85,18 @@ export function solvePositions(
     top = center + half + opt.rowGap
   }
 
-  // x: start with the rows packed to the left, centered on 0 (the iterations make the links straight)
+  // x: start with the given positions, or with the rows packed to the left and centered on 0 (the iterations make the
+  // links straight)
   const x = new Map<string, number>()
   for (const row of rows) {
+    if (opt.initialX) {
+      // a node without a position follows the node before it in the row
+      let previous = 0
+      const wanted = row.ids.map((id) => (previous = opt.initialX?.get(id) ?? previous))
+      const start = spaceOutWith(wanted, row.distances)
+      row.ids.forEach((id, i) => x.set(id, start[i] ?? 0))
+      continue
+    }
     const start = spaceOutWith(
       row.ids.map(() => 0),
       row.distances,
@@ -153,6 +167,8 @@ export function solvePositions(
     }
     spaceOutBlocks()
   }
+
+  if (opt.initialX) spaceOutBlocks() // the groups are kept apart through all the rows
 
   // center the diagram on 0
   const xs = [...x.values()]

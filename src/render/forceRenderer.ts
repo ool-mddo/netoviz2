@@ -20,7 +20,12 @@ import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
 import { layoutSchematic } from './layout/schematic'
 import { selectProfile } from './layout/schematic/profile'
-import type { DiagramProfile, SchematicLayerFn, SchematicReport } from './layout/schematic/types'
+import type {
+  DiagramProfile,
+  SchematicBase,
+  SchematicLayerFn,
+  SchematicReport,
+} from './layout/schematic/types'
 import { type LayerLayoutFn, type LayoutEngine, type LayoutStats, type Positions } from './layout/types'
 
 /** Colors of layers (color-blind friendly palette) */
@@ -111,6 +116,8 @@ export interface RendererOptions {
   schematicLayout?: SchematicLayerFn
   /** Diagram profiles for the schematic layout (see setProfiles) */
   profiles?: readonly DiagramProfile[]
+  /** Lower layers to inherit the arrangement from, by the layer ID (see setSchematicBases) */
+  schematicBases?: ReadonlyMap<string, readonly SchematicBase[]>
   /** Called with null when a layout is started (asynchronous) and with the result when it is done */
   onLayout?: (stats: LayoutStats | null) => void
   /** Called for each layer with what the schematic layout was made from and the exceptions (of the latest layout) */
@@ -149,6 +156,9 @@ export class ForceRenderer {
   private readonly stressLayout: LayerLayoutFn
   private readonly schematicLayout: SchematicLayerFn
   private profiles: readonly DiagramProfile[]
+  private schematicBases: ReadonlyMap<string, readonly SchematicBase[]>
+  /** Changed when the lower layers are changed (to arrange the same graph again with them) */
+  private basesVersion = 0
   private readonly onLayout: (stats: LayoutStats | null) => void
   private readonly onSchematicReport: (report: SchematicReport) => void
   private graph: DisplayGraph = { nodes: [], links: [] }
@@ -194,6 +204,7 @@ export class ForceRenderer {
       options.stressLayout ?? ((nodes, links) => Promise.resolve(layoutWithStress(nodes, links)))
     this.schematicLayout = options.schematicLayout ?? layoutSchematic
     this.profiles = options.profiles ?? []
+    this.schematicBases = options.schematicBases ?? new Map()
     this.onLayout = options.onLayout ?? (() => undefined)
     this.onSchematicReport = options.onSchematicReport ?? (() => undefined)
     const svgSelection = select(svg)
@@ -281,6 +292,16 @@ export class ForceRenderer {
     if (profiles === this.profiles || (profiles.length === 0 && this.profiles.length === 0)) return
     this.profiles = profiles
     if (this.engine === 'schematic') this.relayout()
+  }
+
+  /**
+   * Change the lower layers which the arrangement of the layers is inherited from. It does not arrange: the layout
+   * which comes next (setGraph, setEngine) is made with them, even for the same graph (they are in the signature).
+   */
+  setSchematicBases(bases: ReadonlyMap<string, readonly SchematicBase[]>): void {
+    if (bases === this.schematicBases) return
+    this.schematicBases = bases
+    this.basesVersion++
   }
 
   /** Arrange all the nodes again from scratch (the known positions are forgotten) */
@@ -439,6 +460,10 @@ export class ForceRenderer {
     if (engine === 'schematic') {
       return (layer, items, links) => {
         const profile = selectProfile(this.profiles, layer)
+        const bases = (this.schematicBases.get(layer) ?? []).map((base) => {
+          const baseProfile = selectProfile(this.profiles, base.layer)
+          return baseProfile ? { ...base, profile: baseProfile } : base
+        })
         return this.schematicLayout({
           layer,
           nodes: items.map((item) => ({
@@ -448,6 +473,7 @@ export class ForceRenderer {
             ...(item.kind === undefined ? {} : { kind: item.kind }),
           })),
           links,
+          ...(bases.length > 0 ? { bases } : {}),
           // the report of an old layout (a newer one has been started) is not told
           report: (report) => {
             if (token === this.layoutToken) this.onSchematicReport(report)
@@ -464,7 +490,7 @@ export class ForceRenderer {
     const links = this.simLinks.map(
       (link) => `${this.itemOf(link.source)?.id}>${this.itemOf(link.target)?.id}`,
     )
-    return `${this.engine}|${nodes}|${links.join(',')}`
+    return `${this.engine}|${this.engine === 'schematic' ? this.basesVersion : 0}|${nodes}|${links.join(',')}`
   }
 
   /** Arrange the nodes of each layer by the engine and put the layouts of the layers in a grid */

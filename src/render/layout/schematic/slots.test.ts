@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseProfiles } from './profile'
+import { assignSlots } from './slots'
 import { NO_PAIR_PROFILE, linkOf, namesOf, node, slotsOf } from './testing'
 
 describe('assignSlots', () => {
@@ -53,5 +54,48 @@ rules:
   it('puts three or more nodes of a pair key in one unit', () => {
     const nodes = ['a-mid-1', 'a-mid-2', 'a-mid-3'].map((n) => node(n))
     expect(namesOf(slotsOf(nodes), nodes)['a']?.[1]).toEqual(['a-mid-1+a-mid-2+a-mid-3'])
+  })
+})
+
+describe('assignSlots with the hints and the numeric rows (inheritance)', () => {
+  const annotated = (rows: Record<string, number>) => ({
+    annotations: new Map(
+      Object.entries(rows).map(([name, tierIndex]) => [
+        `l/${name}`,
+        { id: `l/${name}`, captures: {}, group: 'g', tierIndex },
+      ]),
+    ),
+    unclassified: [],
+    unpaired: [],
+  })
+  const names = (layout: ReturnType<typeof assignSlots>, row: number) =>
+    layout.groups[0]?.cells.get(row)?.map((u) => u.ids.join('+').replaceAll('l/', ''))
+
+  it('puts the rows in the numeric order, including the fractions and the negative ones', () => {
+    const nodes = ['a', 'b', 'c'].map((n) => node(n))
+    const layout = assignSlots(nodes, annotated({ a: 0, b: 0.5, c: -0.5 }), [], { unclassifiedRow: 1 })
+    expect(layout.rows).toEqual([-0.5, 0, 0.5])
+  })
+
+  it('puts the nodes in the order of the hints (not by the names)', () => {
+    const nodes = ['x', 'y', 'z'].map((n) => node(n))
+    const hints = new Map([
+      ['l/x', 3],
+      ['l/y', 1],
+      ['l/z', 2],
+    ])
+    const layout = assignSlots(nodes, annotated({ x: 0, y: 0, z: 0 }), [], { unclassifiedRow: 1, hints })
+    expect(names(layout, 0)).toEqual(['y', 'z', 'x'])
+  })
+
+  it('keeps the order of the hints when there are no links (the barycenter method does not change it)', () => {
+    const nodes = ['m1', 'm2', 'm3'].map((n) => node(n))
+    const hints = new Map([
+      ['l/m1', 3],
+      ['l/m2', 1],
+      ['l/m3', 2],
+    ])
+    const layout = assignSlots(nodes, annotated({ m1: 1, m2: 1, m3: 1 }), [], { unclassifiedRow: 2, hints })
+    expect(names(layout, 1)).toEqual(['m2', 'm3', 'm1'])
   })
 })

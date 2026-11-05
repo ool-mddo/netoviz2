@@ -5,7 +5,8 @@ import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
 import { loadProfiles, type ProfileSource } from '../render/layout/schematic/profileSource'
-import type { SchematicReport } from '../render/layout/schematic/types'
+import type { SchematicBase, SchematicReport } from '../render/layout/schematic/types'
+import { lowerLayerIdsOf, schematicBasesOf } from '../domain/schematicBases'
 import SchematicReportPanel from './SchematicReportPanel.vue'
 import {
   LAYOUT_ENGINES,
@@ -40,6 +41,9 @@ const reports = ref<SchematicReport[]>([])
 const profileError = ref('')
 /** The profile of the URL is loaded (or failed): the schematic layout waits for it, not to arrange twice */
 const profileSettled = ref(!props.profile)
+/** The lower layers which the schematic layout inherits from are loaded (the layout waits for them, too) */
+const basesReady = ref(props.engine !== 'schematic')
+let bases: ReadonlyMap<string, readonly SchematicBase[]> = new Map()
 let renderer: ForceRenderer | null = null
 
 /** Stable order of all layers (colors do not change by showing/hiding layers) */
@@ -93,6 +97,7 @@ onMounted(() => {
     },
     {
       engine: props.engine,
+      schematicBases: bases,
       onLayout: (result) => {
         arranging.value = result === null
         if (result) stats.value = result
@@ -111,6 +116,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   profileToken++
+  basesToken++
   renderer?.destroy()
 })
 
@@ -149,11 +155,62 @@ function showGraph(): void {
   renderer?.setHighlight(highlight.value)
 }
 
+const visibleLoaded = computed(() => props.visibleLayers.every((id) => topology.layerData[id]))
 const loaded = computed(
-  () =>
-    props.visibleLayers.every((id) => topology.layerData[id]) &&
-    (props.engine !== 'schematic' || profileSettled.value),
+  () => visibleLoaded.value && (props.engine !== 'schematic' || (profileSettled.value && basesReady.value)),
 )
+
+/** To ignore the result of an old (asynchronous) loading of the lower layers */
+let basesToken = 0
+/** The engine is changed to schematic: the renderer is told after the lower layers are loaded */
+let pendingEngine = false
+/**
+ * Load the lower layers which the visible layers reach by the supports (the candidates to inherit the arrangement
+ * from) and give them to the schematic layout.
+ */
+async function prepareBases(): Promise<void> {
+  const token = ++basesToken
+  if (props.engine !== 'schematic') {
+    basesReady.value = true
+    return
+  }
+  basesReady.value = false
+  if (!visibleLoaded.value) return // it is prepared again when the layers are loaded
+  try {
+    await topology.ensureSupports()
+    const layers = topology.summary?.layers ?? []
+    const needed = new Set(
+      props.visibleLayers.flatMap((id) => {
+        const data = topology.layerData[id]
+        return data ? lowerLayerIdsOf(data, layers, topology.supportIndex) : []
+      }),
+    )
+    await Promise.all([...needed].map((id) => topology.loadLayer(id)))
+    if (token !== basesToken) return
+    bases = new Map(
+      props.visibleLayers.map((id) => [
+        id,
+        schematicBasesOf(id, topology.layerData, layers, topology.supportIndex),
+      ]),
+    )
+    renderer?.setSchematicBases(bases)
+  } catch (error) {
+    // the layout is made without the lower layers
+    console.warn('netoviz2: cannot load the lower layers of the schematic layout', error)
+  }
+  if (token !== basesToken) return
+  basesReady.value = true
+  if (pendingEngine) {
+    // the engine was changed to schematic while the lower layers were loaded: arrange once, with them
+    pendingEngine = false
+    renderer?.setEngine('schematic')
+  } else if (loaded.value) {
+    showGraph()
+  }
+}
+watch([() => props.engine, () => props.visibleLayers.join(','), visibleLoaded], () => void prepareBases(), {
+  immediate: true,
+})
 // the first layout which waited for the profile (a profile changed later is arranged by setProfiles)
 watch(profileSettled, (settled) => {
   if (!settled || graphShown || !loaded.value) return
@@ -167,7 +224,11 @@ watch(graph, () => {
 watch(highlight, () => renderer?.setHighlight(highlight.value))
 watch(
   () => props.engine,
-  (engine) => renderer?.setEngine(engine),
+  (engine) => {
+    // (prepareBases is called before this: basesReady is false while the lower layers are loaded)
+    pendingEngine = engine === 'schematic' && !basesReady.value
+    if (!pendingEngine) renderer?.setEngine(engine)
+  },
 )
 
 const statsText = computed(() => {

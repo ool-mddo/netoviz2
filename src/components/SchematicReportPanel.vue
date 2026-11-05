@@ -4,10 +4,17 @@ import type { SchematicReport } from '../render/layout/schematic/types'
 
 defineProps<{ reports: SchematicReport[] }>()
 
-const SOURCE_LABELS: Record<SchematicReport['source'], string> = {
-  profile: 'profile',
-  inferred: 'inferred (no usable profile)',
-  none: 'no profile (stress layout)',
+function sourceLabel(report: SchematicReport): string {
+  switch (report.source) {
+    case 'profile':
+      return 'profile'
+    case 'inferred':
+      return 'inferred (no usable profile)'
+    case 'inherited':
+      return `inherited from ${report.base ?? 'the lower layer'}`
+    case 'none':
+      return 'no profile (stress layout)'
+  }
 }
 
 /** Layer whose draft was copied (to tell it) */
@@ -33,7 +40,7 @@ async function copy(report: SchematicReport): Promise<void> {
   <div class="schematic-report" data-testid="schematic-report">
     <div v-for="report in reports" :key="report.layer" class="report" :data-layer="report.layer">
       <span class="layer">{{ report.layer }}</span>
-      <span class="source" data-testid="report-source">{{ SOURCE_LABELS[report.source] }}</span>
+      <span class="source" data-testid="report-source">{{ sourceLabel(report) }}</span>
       <details v-if="report.violations.length > 0" class="violations">
         <summary data-testid="report-violations">
           {{ report.violations.length }} {{ report.violations.length === 1 ? 'exception' : 'exceptions' }}

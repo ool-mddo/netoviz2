@@ -548,6 +548,37 @@ describe('ForceRenderer', () => {
         expect(stress).toHaveBeenCalledTimes(2)
       })
 
+      it('gives the lower layers to the layout, with the profile of the lower layer; the next layout is made with changed ones', async () => {
+        const layout = lineSchematic()
+        const { profiles } = parseProfiles('view: v\ntarget: { layer: base }\n')
+        const base = { layer: 'base', nodes: [], links: [], lowerOf: new Map<string, string[]>() }
+        renderer.destroy()
+        renderer = new ForceRenderer(svg, callbacks, {
+          multiStart: 1,
+          engine: 'schematic',
+          schematicLayout: layout,
+          profiles,
+          schematicBases: new Map([['l1', [base]]]),
+        })
+        renderer.setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        const [first, second] = layout.mock.calls.map((call) => call[0])
+        expect(first?.bases?.map((b) => [b.layer, b.profile?.view])).toEqual([['base', 'v']])
+        expect(second?.bases).toBeUndefined() // no base for l2
+        // changing the lower layers does not arrange by itself: the next layout is made with them, even for the same graph
+        renderer.setSchematicBases(new Map())
+        await flush()
+        expect(layout).toHaveBeenCalledTimes(2)
+        renderer.setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        expect(layout).toHaveBeenCalledTimes(4)
+        expect(layout.mock.calls[2]?.[0].bases).toBeUndefined()
+        // the same lower layers (or the same graph without a change) are not arranged again
+        renderer.setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        expect(layout).toHaveBeenCalledTimes(4)
+      })
+
       it('tells the report of each layer, but not the one which comes after a newer layout is started', async () => {
         const reports: string[] = []
         renderer.destroy()

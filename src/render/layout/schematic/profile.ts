@@ -11,10 +11,11 @@ export class ProfileError extends Error {}
 
 // Unknown keys (e.g. the keys of the design which are not supported yet) are ignored with a warning: a typo in
 // `target` would widen the layers the profile is applied to, so it is checked as well.
-const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'name', 'rules'])
+const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'name', 'inherit', 'rules'])
 const KNOWN_TARGET_KEYS = new Set(['network', 'layer'])
 const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'pair'])
 const KNOWN_PAIR_KEYS = new Set(['by', 'primary'])
+const KNOWN_INHERIT_KEYS = new Set(['from', 'via'])
 
 function warnUnknownKeys(
   raw: Record<string, unknown>,
@@ -107,6 +108,15 @@ function parseProfile(value: unknown, warnings: string[]): DiagramProfile {
   const target: DiagramProfile['target'] = {}
   if (targetRaw.network !== undefined) target.network = asString(targetRaw.network, 'target.network')
   if (targetRaw.layer !== undefined) target.layer = asString(targetRaw.layer, 'target.layer')
+  let inherit: DiagramProfile['inherit']
+  if (raw.inherit !== undefined) {
+    const inheritRaw = asRecord(raw.inherit, 'inherit')
+    warnUnknownKeys(inheritRaw, KNOWN_INHERIT_KEYS, 'inherit: ', warnings)
+    if (inheritRaw.via !== undefined && inheritRaw.via !== 'supports') {
+      warnings.push(`inherit: via '${String(inheritRaw.via)}' is not supported (only supports)`)
+    }
+    inherit = { from: asString(inheritRaw.from, 'inherit.from') }
+  }
   const tiersRaw = raw.tiers ?? []
   if (!Array.isArray(tiersRaw)) throw new ProfileError('tiers must be a list')
   const tiers = tiersRaw.map((tier, i) => asString(tier, `tiers[${i}]`))
@@ -122,6 +132,7 @@ function parseProfile(value: unknown, warnings: string[]): DiagramProfile {
   if (!Array.isArray(rulesRaw)) throw new ProfileError('rules must be a list')
   const rules = rulesRaw.map((rule, i) => parseRule(rule, i, tiers, warnings))
   const profile: DiagramProfile = { view, target, tiers, rules }
+  if (inherit) profile.inherit = inherit
   if (name) profile.name = name
   return profile
 }

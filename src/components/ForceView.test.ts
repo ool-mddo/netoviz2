@@ -7,9 +7,15 @@ import { useTopologyStore } from '../stores/topology'
 import { useViewStore } from '../stores/view'
 import { attributesData, layer1Data, layer2Data, makeSummary, supportsData } from '../test/fixtures'
 import { profileSourceOf } from '../render/layout/schematic/profileSource'
+import { layoutSchematic } from '../render/layout/schematic'
 import ForceView from './ForceView.vue'
 
 vi.mock('../api/client')
+// the schematic layout is the real one, with the calls recorded
+vi.mock('../render/layout/schematic', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../render/layout/schematic')>()
+  return { ...original, layoutSchematic: vi.fn(original.layoutSchematic) }
+})
 const mocked = vi.mocked(api)
 
 async function mountView(
@@ -196,6 +202,75 @@ describe('ForceView', () => {
         expect(wrapper.get('[data-testid=layout-stats]').attributes('data-engine')).toBe('stress'),
       )
       expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
+    })
+  })
+
+  describe('lower layers of the schematic layout', () => {
+    it('loads the lower layer which the visible layer reaches by the supports (layer2 -> layer1), only for schematic', async () => {
+      mocked.getLayer.mockClear()
+      const { wrapper } = await mountView(['layer2'], ['layer2'], { engine: 'schematic' })
+      current = wrapper
+      await vi.waitFor(() => expect(count(wrapper, 'g.node:not(.tp)')).toBe(1))
+      expect(mocked.getLayer).toHaveBeenCalledWith('nw', 'ss', 'layer1')
+      expect(wrapper.findAll('[data-testid=report-source]').map((e) => e.text())).toEqual([
+        'no profile (stress layout)', // layer1 has only two nodes and no profile: nothing to inherit
+      ])
+    })
+
+    // the profile of the lower layer (layer1): all the nodes of it are given a tier, so layer2 can inherit
+    const baseProfile = profileSourceOf({
+      'base.yaml': () =>
+        Promise.resolve(
+          "view: v\ntarget: { layer: layer1 }\ntiers: [t]\nrules:\n  - { select: '*', tier: t }\n",
+        ),
+    })
+
+    it('arranges once with the lower layer when the engine is changed to schematic, and tells it inherits', async () => {
+      const { wrapper } = await mountView(['layer2'], ['layer2'], {
+        profile: 'base',
+        profileSource: baseProfile,
+      })
+      current = wrapper
+      vi.mocked(layoutSchematic).mockClear()
+      await wrapper.setProps({ engine: 'schematic' })
+      await vi.waitFor(() => expect(wrapper.find('[data-testid=report-source]').exists()).toBe(true))
+      await flushPromises()
+      expect(layoutSchematic).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(layoutSchematic).mock.calls[0]?.[0].bases?.map((b) => b.layer)).toEqual(['layer1'])
+      expect(wrapper.get('[data-testid=report-source]').text()).toBe('inherited from layer1')
+    })
+
+    it('arranges once with the lower layer when the view is opened with the schematic engine', async () => {
+      vi.mocked(layoutSchematic).mockClear()
+      const { wrapper } = await mountView(['layer2'], ['layer2'], {
+        engine: 'schematic',
+        profile: 'base',
+        profileSource: baseProfile,
+      })
+      current = wrapper
+      await vi.waitFor(() => expect(wrapper.find('[data-testid=report-source]').exists()).toBe(true))
+      await flushPromises()
+      expect(layoutSchematic).toHaveBeenCalledTimes(1)
+      expect(wrapper.get('[data-testid=report-source]').text()).toBe('inherited from layer1')
+    })
+
+    it('arranges even if the lower layer cannot be loaded (without it)', async () => {
+      mocked.getLayer.mockImplementation((_nw, _ss, id) =>
+        id === 'layer1' ? Promise.reject(new Error('down')) : Promise.resolve(layer2Data),
+      )
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const { wrapper } = await mountView(['layer2'], ['layer2'], { engine: 'schematic' })
+      current = wrapper
+      await vi.waitFor(() => expect(count(wrapper, 'g.node:not(.tp)')).toBe(1))
+      warn.mockRestore()
+    })
+
+    it('does not load them for the other engines', async () => {
+      mocked.getLayer.mockClear()
+      const { wrapper } = await mountView(['layer2'], ['layer2'])
+      current = wrapper
+      await flushPromises()
+      expect(mocked.getLayer).not.toHaveBeenCalledWith('nw', 'ss', 'layer1')
     })
   })
 

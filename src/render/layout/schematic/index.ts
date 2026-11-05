@@ -2,13 +2,25 @@ import { layoutWithStress } from '../stress'
 import type { Positions } from '../types'
 import { annotate, type Annotated } from './annotate'
 import { inferProfile } from './infer'
+import { placeConnectors } from './connectors'
+import { inheritAnnotations } from './inherit'
 import { solvePositions } from './solve'
 import { assignSlots } from './slots'
-import type { DiagramProfile, SchematicLayerInput, SchematicNode, SchematicViolation } from './types'
+import type {
+  DiagramProfile,
+  SchematicBase,
+  SchematicLayerInput,
+  SchematicNode,
+  SchematicReport,
+  SchematicViolation,
+} from './types'
+
+type Link = { source: string; target: string }
 
 function violationsOf(
   nodes: readonly SchematicNode[],
   { unclassified, unpaired }: Annotated,
+  source: SchematicReport['source'],
 ): SchematicViolation[] {
   const nameOf = new Map(nodes.map((node) => [node.id, node.name]))
   const message = (id: string, text: string) => `${nameOf.get(id) ?? id}: ${text}`
@@ -16,7 +28,12 @@ function violationsOf(
     ...unclassified.map((id) => ({
       id,
       code: 'unclassified' as const,
-      message: message(id, 'no tier is given (the name does not fit the profile, or no rule gives a tier)'),
+      message: message(
+        id,
+        source === 'inherited'
+          ? 'is not supported by any classified node of the lower layer'
+          : 'no tier is given (the name does not fit the profile, or no rule gives a tier)',
+      ),
     })),
     ...unpaired.map((id) => ({
       id,
@@ -26,35 +43,157 @@ function violationsOf(
   ]
 }
 
+interface Arranged {
+  positions: Positions
+  annotated: Annotated
+  source: SchematicReport['source']
+  base?: string
+  draft?: string
+}
+
+/** Arrange by a profile; undefined if the profile gives no tier to any node (it does not fit) */
+function arrangeByProfile(
+  nodes: readonly SchematicNode[],
+  links: readonly Link[],
+  profile: DiagramProfile,
+): Pick<Arranged, 'positions' | 'annotated'> | undefined {
+  const annotated = annotate(nodes, profile)
+  if (annotated.unclassified.length >= nodes.length) return undefined
+  const slots = assignSlots(nodes, annotated, links, { unclassifiedRow: profile.tiers.length })
+  return { annotated, positions: solvePositions(nodes, slots, links) }
+}
+
+type BaseArrangement = Pick<Arranged, 'positions' | 'annotated'> | undefined
+/** Arrangements of the base layers (the array of the nodes of a base layer is not changed until it is loaded again) */
+const baseCache = new WeakMap<
+  object,
+  { links: object; profile?: DiagramProfile; arranged: BaseArrangement }
+>()
+
+/**
+ * Arrange the base layer by its profile, or by the profile inferred from its names and links. (It is not arranged by
+ * inheritance from the layer below it, so it can be different from the arrangement shown for the base layer.)
+ */
+function arrangeBase(base: SchematicBase): BaseArrangement {
+  const cached = baseCache.get(base.nodes)
+  if (cached && cached.links === base.links && cached.profile === base.profile) return cached.arranged
+  const profile = base.profile ?? inferProfile(base.nodes, base.links)?.profile
+  const arranged = profile && arrangeByProfile(base.nodes, base.links, profile)
+  baseCache.set(base.nodes, {
+    links: base.links,
+    ...(base.profile ? { profile: base.profile } : {}),
+    arranged,
+  })
+  return arranged
+}
+
+/** Gap between the devices in a row (a connection point is put between them) */
+const DEVICE_GAP = 70
+
+/**
+ * The layer inherits the arrangement of the base layer (through the supports): the devices (the nodes supported by one
+ * node of the base layer) are at the positions of the base layer, and the connection points (the nodes supported by
+ * two or more of them, e.g. the segments) are put between the devices they are linked to.
+ * @returns undefined if the base layer does not fit the layer (it classifies few nodes)
+ */
+function arrangeByInheritance(
+  nodes: readonly SchematicNode[],
+  links: readonly Link[],
+  base: SchematicBase,
+): Arranged | undefined {
+  const arranged = arrangeBase(base)
+  if (!arranged) return undefined
+  const { annotated, devices, connectors, hints, unclassifiedRow } = inheritAnnotations(nodes, base.lowerOf, {
+    annotations: arranged.annotated.annotations,
+    positions: arranged.positions,
+  })
+  // the base layer does not fit this layer: it classifies few devices (or all the nodes are connection points)
+  if (devices.length === 0 || annotated.unclassified.length * 2 > devices.length) return undefined
+  // the order of the devices is the one of the base layer (the hints; no links are given: it is not changed)
+  const slots = assignSlots(devices, annotated, [], { unclassifiedRow, hints })
+  const placed = solvePositions(devices, slots, [], {
+    initialX: hints,
+    iterations: 0,
+    nodeGap: DEVICE_GAP,
+    pairGap: DEVICE_GAP,
+  })
+  const radius = new Map(nodes.map((node) => [node.id, node.radius]))
+  const between = placeConnectors(
+    connectors.map((node) => ({ id: node.id, radius: node.radius })),
+    links,
+    placed,
+    (id) => radius.get(id) ?? 0,
+  )
+  // the connection points which are not linked to any device are in a row under the diagram, centered
+  const positions: Positions = new Map([...placed, ...between])
+  const alone = connectors.filter((node) => !between.has(node.id))
+  if (alone.length > 0) {
+    const bottom = [...positions.entries()].reduce(
+      (max, [id, p]) => Math.max(max, p.y + (radius.get(id) ?? 0)),
+      0,
+    )
+    const width = alone.reduce((sum, node) => sum + 2 * node.radius + 20, -20)
+    const xs = [...positions.values()].map((p) => p.x)
+    let x = (xs.length > 0 ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0) - width / 2
+    for (const node of alone) {
+      positions.set(node.id, { x: x + node.radius, y: bottom + 90 })
+      x += 2 * node.radius + 20
+    }
+  }
+  return { positions, annotated, source: 'inherited', base: base.layer }
+}
+
 /**
  * Layout of a layer for network diagrams (the schematic engine):
  * annotate (meaning from the profile) -> slots (group / row / order) -> solve (coordinates).
- * The given profile is used first. If there is none, or it gives no tier to any node (it does not fit the layer), the
- * profile is inferred from the names and the links of the layer. If that gives nothing either, the nodes are
- * arranged by the stress layout. What the layout was made from, and the exceptions, are reported.
+ * The ways to give the meaning are tried in this order, and the first which fits the layer is used:
+ * 1. the given profile (a profile which has `inherit` means the arrangement of that lower layer, see 2.),
+ * 2. the arrangement of a lower layer through the supports (group / tier / order are inherited),
+ * 3. the profile inferred from the names and the links of the layer,
+ * 4. the stress layout.
+ * What the layout was made from, and the exceptions, are reported.
  */
 export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> {
   const { layer, profile, nodes, links, report } = input
-  const attempts: Array<() => { profile: DiagramProfile; draft?: string } | undefined> = []
-  if (profile) attempts.push(() => ({ profile }))
+  const bases = input.bases ?? []
+  const inheritFrom = profile?.inherit?.from
+  const attempts: Array<() => Arranged | undefined> = []
+
+  if (profile && inheritFrom === undefined) {
+    attempts.push(() => {
+      const arranged = arrangeByProfile(nodes, links, profile)
+      return arranged && { ...arranged, source: 'profile' }
+    })
+  }
+  // the lower layer which the profile names comes first; the others in the given order (the lowest layer first)
+  const orderedBases = [
+    ...bases.filter((b) => b.layer === inheritFrom),
+    ...bases.filter((b) => b.layer !== inheritFrom),
+  ]
+  for (const base of orderedBases) attempts.push(() => arrangeByInheritance(nodes, links, base))
+  if (profile && inheritFrom !== undefined) {
+    attempts.push(() => {
+      const arranged = arrangeByProfile(nodes, links, profile)
+      return arranged && { ...arranged, source: 'profile' }
+    })
+  }
   attempts.push(() => {
     const inferred = inferProfile(nodes, links)
-    return inferred && { profile: inferred.profile, draft: inferred.yaml }
+    const arranged = inferred && arrangeByProfile(nodes, links, inferred.profile)
+    return arranged && inferred && { ...arranged, source: 'inferred', draft: inferred.yaml }
   })
 
   for (const attempt of attempts) {
-    const found = attempt()
-    if (!found) continue
-    const annotated = annotate(nodes, found.profile)
-    if (annotated.unclassified.length >= nodes.length) continue
+    const arranged = attempt()
+    if (!arranged) continue
     report?.({
       layer,
-      source: found.draft === undefined ? 'profile' : 'inferred',
-      violations: violationsOf(nodes, annotated),
-      ...(found.draft === undefined ? {} : { draft: found.draft }),
+      source: arranged.source,
+      violations: violationsOf(nodes, arranged.annotated, arranged.source),
+      ...(arranged.base === undefined ? {} : { base: arranged.base }),
+      ...(arranged.draft === undefined ? {} : { draft: arranged.draft }),
     })
-    const slots = assignSlots(nodes, annotated, links, found.profile)
-    return Promise.resolve(solvePositions(nodes, slots, links))
+    return Promise.resolve(arranged.positions)
   }
 
   report?.({ layer, source: 'none', violations: [] })

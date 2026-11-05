@@ -35,6 +35,8 @@ export interface DiagramProfile {
   tiers: string[]
   /** Regular expression with named groups to split the name of a node (matched against `name`, not the ID) */
   name?: RegExp
+  /** The layer whose group / tier / order are inherited through the supports (default: found automatically) */
+  inherit?: { from: string }
   /** Later rules win */
   rules: ProfileRule[]
 }
@@ -55,11 +57,30 @@ export interface SchematicViolation {
   message: string
 }
 
+/**
+ * A lower layer whose arrangement (group / tier / order) is inherited through the supports: its nodes and links, and
+ * which of its nodes support each node of the layer (through the chain of node supports).
+ */
+export interface SchematicBase {
+  layer: string
+  nodes: readonly SchematicNode[]
+  links: ReadonlyArray<{ source: string; target: string }>
+  /** For each node of the layer, the nodes of this base layer which support it */
+  lowerOf: ReadonlyMap<string, readonly string[]>
+  /** Profile for the base layer (none: it is inferred) */
+  profile?: DiagramProfile
+}
+
 /** What the schematic layout of a layer was made from, and the exceptions */
 export interface SchematicReport {
   layer: string
-  /** profile: the given profile. inferred: the profile inferred from the names and the links. none: no profile (stress) */
-  source: 'profile' | 'inferred' | 'none'
+  /**
+   * profile: the given profile. inferred: the profile inferred from the names and the links. inherited: the arrangement
+   * of the lower layer `base`. none: no profile (stress).
+   */
+  source: 'profile' | 'inferred' | 'inherited' | 'none'
+  /** The layer which the arrangement is inherited from (source is inherited) */
+  base?: string
   violations: SchematicViolation[]
   /** The inferred profile as YAML (the draft which a person can correct and keep) */
   draft?: string
@@ -71,6 +92,8 @@ export interface SchematicLayerInput {
   links: ReadonlyArray<{ source: string; target: string }>
   /** Profile for this layer (none: the profile is inferred from the names and the links) */
   profile?: DiagramProfile
+  /** Lower layers to inherit the arrangement from, in the order to try (the lowest layer first) */
+  bases?: readonly SchematicBase[]
   /** Called with what the layout was made from and the exceptions */
   report?: (report: SchematicReport) => void
 }

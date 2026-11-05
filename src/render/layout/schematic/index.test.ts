@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { layoutQuality } from '../quality'
 import { mddoFwLayer1 } from '../../../test/mddoFwLayer1'
 import { mddoMregnwLayer1, mddoBgpLayer1, mddoNetworkLayer1 } from '../../../test/sampleLayers'
+import { mddoFwLayer } from '../../../test/mddoFwStack'
 import { layoutSchematic } from './index'
+import { mddoFwBasesOf } from './testing'
 import { parseProfiles } from './profile'
 import type { SchematicReport } from './types'
 import { loadProfiles } from './profileSource'
@@ -183,5 +185,172 @@ describe('layoutSchematic with a given profile', () => {
     ).profiles[0]!
     await layoutSchematic({ ...mddoFwLayer1(), profile: unrelated, report: (r) => reports.push(r) })
     expect(reports[0]).toMatchObject({ source: 'inferred' })
+  })
+})
+
+describe('layoutSchematic by inheritance (mddo-fw layer3 and layer2 from layer1)', () => {
+  const arrangeLayer = async (
+    layer: 'layer2' | 'layer3',
+    extra: Partial<Parameters<typeof layoutSchematic>[0]> = {},
+  ) => {
+    const input = mddoFwLayer(layer)
+    const reports: SchematicReport[] = []
+    const positions = await layoutSchematic({
+      ...input,
+      bases: mddoFwBasesOf(layer),
+      report: (r) => reports.push(r),
+      ...extra,
+    })
+    const at = (name: string) => positions.get(input.nodes.find((n) => n.name === name)!.id)!
+    return { input, positions, reports, at }
+  }
+  const DEVICES = ['br', 'fw', 'cr', 'host']
+
+  it('layer3 is arranged from layer1 (the names of layer3 give nothing: segments are most of them)', async () => {
+    const { reports } = await arrangeLayer('layer3')
+    expect(reports).toEqual([{ layer: 'layer3', source: 'inherited', base: 'layer1', violations: [] }])
+  })
+
+  it('without the base, layer3 cannot be inferred and is arranged by stress (reported as none)', async () => {
+    const { reports } = await arrangeLayer('layer3', { bases: undefined })
+    expect(reports[0]).toMatchObject({ source: 'none' })
+  })
+
+  it('puts the devices in the same sites and tiers as layer1, in the same order', async () => {
+    const layer1 = mddoFwLayer('layer1')
+    const written = await layoutSchematic(layer1)
+    const base = (name: string) => written.get(layer1.nodes.find((n) => n.name === name)!.id)!
+    const { at } = await arrangeLayer('layer3')
+    for (const role of DEVICES) {
+      const names = ['a', 'b', 'c'].flatMap((site) => [1, 2].map((i) => `site-${site}-${role}-${i}`))
+      const order = (f: (name: string) => { x: number }) => [...names].sort((p, q) => f(p).x - f(q).x)
+      expect(order(at)).toEqual(order(base))
+    }
+    const ys = DEVICES.map((role) => at(`site-a-${role}-1`).y)
+    expect([...ys].sort((p, q) => p - q)).toEqual(ys) // br, fw, cr, host from the top
+    expect(at('site-a-br-1').y).toBe(at('site-c-br-2').y)
+  })
+
+  it('puts every segment clear of the other nodes, and its links do not pass through the other nodes', async () => {
+    const { input, at } = await arrangeLayer('layer3')
+    const nameOf = new Map(input.nodes.map((n) => [n.id, n.name]))
+    const segments = input.nodes.filter((n) => n.name.startsWith('Seg_'))
+    const distance = (
+      p: { x: number; y: number },
+      a: { x: number; y: number },
+      b: { x: number; y: number },
+    ) => {
+      const [dx, dy] = [b.x - a.x, b.y - a.y]
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)))
+      return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+    }
+    for (const segment of segments) {
+      for (const link of input.links.filter((l) => l.source === segment.id || l.target === segment.id)) {
+        const device = nameOf.get(link.source === segment.id ? link.target : link.source)!
+        for (const other of input.nodes) {
+          if (other.id === segment.id || other.name === device) continue
+          // (the radius 11 and the margin which the placement keeps is 10: it is checked with the radius only here)
+          expect(distance(at(other.name), at(segment.name), at(device))).toBeGreaterThanOrEqual(11)
+        }
+      }
+    }
+  })
+
+  it('puts a segment between the devices it joins: in the middle of a link between two rows', async () => {
+    const { at } = await arrangeLayer('layer3')
+    // Seg_192.168.1.0/30 joins site-a-fw-1 and site-a-cr-1: it is between the rows of the devices
+    const devices = ['site-a-fw-1', 'site-a-cr-1'].map((name) => at(name).y)
+    const segment = at('Seg_192.168.1.0/30').y
+    expect(segment).toBeGreaterThan(Math.min(...devices))
+    expect(segment).toBeLessThan(Math.max(...devices))
+  })
+
+  it('puts a link between sites over the row of the devices (not through the devices between them)', async () => {
+    const { at } = await arrangeLayer('layer3')
+    // Seg_172.32.0.0/30 joins site-a-br-1 and site-c-br-1, and site-b is between them
+    expect(at('Seg_172.32.0.0/30').y).toBeLessThan(at('site-a-br-1').y)
+  })
+
+  it('has no overlap, and the crossings are recorded (12 at the time of writing; stress has 7)', async () => {
+    const { input, positions } = await arrangeLayer('layer3')
+    const quality = layoutQuality(
+      input.nodes.map((n) => ({ ...n, ...positions.get(n.id)! })),
+      input.links,
+    )
+    expect(quality.overlap).toBe(0)
+    expect(quality.crossings).toBeLessThanOrEqual(12)
+  })
+
+  it('layer2 is arranged from layer1: the interfaces of a device are in the row of the device, side by side', async () => {
+    const { input, at, reports } = await arrangeLayer('layer2')
+    expect(reports[0]).toMatchObject({ source: 'inherited', base: 'layer1', violations: [] })
+    const interfaces = input.nodes.filter((n) => n.name.startsWith('site-a-br-1_')).map((n) => n.name)
+    expect(interfaces.length).toBeGreaterThan(1)
+    const ys = new Set(interfaces.map((n) => at(n).y))
+    expect(ys.size).toBe(1)
+    expect(at('site-a-br-1_ge-0/0/0.0').y).toBeLessThan(at('site-a-fw-1_ge-0/0/1.0').y)
+  })
+
+  it('uses the given profile which fits the layer before the inheritance', async () => {
+    const own = parseProfiles(
+      "view: v\ntiers: [x]\nname: '^(?<site>site)-(?<r>[a-z]+)-.*$'\nrules:\n  - { select: '[site=site]', tier: x }\n",
+    ).profiles[0]!
+    const { reports } = await arrangeLayer('layer3', { profile: own })
+    expect(reports[0]).toMatchObject({ source: 'profile' })
+    expect(reports[0]?.base).toBeUndefined()
+  })
+
+  it('falls back to the inference when the base does not fit the layer (it supports few nodes)', async () => {
+    const [base] = mddoFwBasesOf('layer2')
+    const emptyBase = { ...base!, lowerOf: new Map<string, string[]>() }
+    const { reports } = await arrangeLayer('layer2', { bases: [emptyBase] })
+    // the names of the interfaces (`site-a-br-1_ge-0/0/0.0`) give a profile: it is not none
+    expect(reports[0]?.source).not.toBe('inherited')
+  })
+
+  it('reports the nodes which no classified node supports, in the words of the inheritance', async () => {
+    const [base] = mddoFwBasesOf('layer2')
+    const lowerOf = new Map(base!.lowerOf)
+    const dropped = mddoFwLayer('layer2').nodes[0]!.id
+    lowerOf.delete(dropped)
+    const { reports } = await arrangeLayer('layer2', { bases: [{ ...base!, lowerOf }] })
+    expect(reports[0]).toMatchObject({ source: 'inherited' })
+    expect(reports[0]?.violations).toEqual([
+      expect.objectContaining({
+        id: dropped,
+        code: 'unclassified',
+        message: expect.stringContaining('lower layer'),
+      }),
+    ])
+  })
+
+  it('does not inherit when all the nodes are connection points (nothing is arranged): it falls back', async () => {
+    const [base] = mddoFwBasesOf('layer3').filter((b) => b.layer === 'layer1')
+    const [br1, br2] = ['site-a-br-1', 'site-a-br-2'].map((n) => base!.nodes.find((x) => x.name === n)!.id)
+    const nodes = ['x', 'y', 'z'].map((n) => ({ id: `l/${n}`, name: n, radius: 11 }))
+    const lowerOf = new Map(nodes.map((n) => [n.id, [br1!, br2!]]))
+    const links = [
+      { source: 'l/x', target: 'l/y' },
+      { source: 'l/y', target: 'l/z' },
+    ]
+    const reports: SchematicReport[] = []
+    const positions = await layoutSchematic({
+      layer: 'l',
+      nodes,
+      links,
+      bases: [{ ...base!, lowerOf }],
+      report: (r) => reports.push(r),
+    })
+    expect(reports[0]?.source).toBe('none')
+    expect(positions.size).toBe(3)
+  })
+
+  it('uses the base which the profile names (inherit.from), the others after it', async () => {
+    const named = parseProfiles('view: v\ninherit: { from: layer2 }\n').profiles[0]!
+    const first = await arrangeLayer('layer3', { profile: named })
+    // layer2 as the base is arranged by the inference (interface names): if it does not fit, layer1 is used
+    expect(['layer1', 'layer2']).toContain(first.reports[0]?.base)
+    const layer1 = parseProfiles('view: v\ninherit: { from: layer1 }\n').profiles[0]!
+    expect((await arrangeLayer('layer3', { profile: layer1 })).reports[0]).toMatchObject({ base: 'layer1' })
   })
 })
