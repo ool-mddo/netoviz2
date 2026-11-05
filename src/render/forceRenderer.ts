@@ -18,7 +18,10 @@ import { radiusForPorts, spreadAngles } from '../domain/ports'
 import { layoutWithStress } from './layout/stress'
 import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
-import { type LayerLayoutFn, type LayoutEngine, type LayoutStats } from './layout/types'
+import { layoutSchematic } from './layout/schematic'
+import { selectProfile } from './layout/schematic/profile'
+import type { DiagramProfile, SchematicLayerFn } from './layout/schematic/types'
+import { type LayerLayoutFn, type LayoutEngine, type LayoutStats, type Positions } from './layout/types'
 
 /** Colors of layers (color-blind friendly palette) */
 export const LAYER_COLORS = [
@@ -83,6 +86,13 @@ const DEFAULT_MULTISTART = 6
 type Item = SimulationNodeDatum & DisplayNode & { radius: number; angle?: number }
 type SimLink = SimulationLinkDatum<Item> & { source: string | Item; target: string | Item; count: number }
 
+/** Arrange the nodes of a layer (the layer ID, the nodes and the links in the layer) */
+type LayerArrangeFn = (
+  layer: string,
+  items: readonly Item[],
+  links: ReadonlyArray<{ source: string; target: string }>,
+) => Promise<Positions>
+
 export interface RendererCallbacks {
   /** Click on a node/term-point (id) or on the background (null) */
   onSelect: (id: string | null) => void
@@ -97,6 +107,10 @@ export interface RendererOptions {
   engine?: LayoutEngine
   /** Function to arrange with the own stress layout (default: layoutWithStress) */
   stressLayout?: LayerLayoutFn
+  /** Function to arrange with the schematic layout (default: layoutSchematic) */
+  schematicLayout?: SchematicLayerFn
+  /** Diagram profiles for the schematic layout (see setProfiles) */
+  profiles?: readonly DiagramProfile[]
   /** Called with null when a layout is started (asynchronous) and with the result when it is done */
   onLayout?: (stats: LayoutStats | null) => void
 }
@@ -131,6 +145,8 @@ export class ForceRenderer {
   private readonly multiStart: number
   private engine: LayoutEngine
   private readonly stressLayout: LayerLayoutFn
+  private readonly schematicLayout: SchematicLayerFn
+  private profiles: readonly DiagramProfile[]
   private readonly onLayout: (stats: LayoutStats | null) => void
   private graph: DisplayGraph = { nodes: [], links: [] }
   /** To ignore the result of an old (asynchronous) layout */
@@ -173,6 +189,8 @@ export class ForceRenderer {
     this.engine = options.engine ?? 'force'
     this.stressLayout =
       options.stressLayout ?? ((nodes, links) => Promise.resolve(layoutWithStress(nodes, links)))
+    this.schematicLayout = options.schematicLayout ?? layoutSchematic
+    this.profiles = options.profiles ?? []
     this.onLayout = options.onLayout ?? (() => undefined)
     const svgSelection = select(svg)
     this.root = svgSelection.append('g').attr('class', 'viewport')
@@ -251,6 +269,14 @@ export class ForceRenderer {
     if (engine === this.engine) return
     this.engine = engine
     this.relayout()
+  }
+
+  /** Change the diagram profiles (the schematic layout is made again with them) */
+  setProfiles(profiles: readonly DiagramProfile[]): void {
+    // nothing changes without profiles (and a relayout forgets the positions the user moved)
+    if (profiles === this.profiles || (profiles.length === 0 && this.profiles.length === 0)) return
+    this.profiles = profiles
+    if (this.engine === 'schematic') this.relayout()
   }
 
   /** Arrange all the nodes again from scratch (the known positions are forgotten) */
@@ -398,8 +424,31 @@ export class ForceRenderer {
   }
 
   /** Function to arrange the nodes of a layer by the engine (undefined for force: it is made by the simulation) */
-  private layerLayoutOf(engine: LayoutEngine): LayerLayoutFn | undefined {
-    return engine === 'stress' ? this.stressLayout : undefined
+  private layerLayoutOf(engine: LayoutEngine): LayerArrangeFn | undefined {
+    if (engine === 'stress') {
+      return (_layer, items, links) =>
+        this.stressLayout(
+          items.map((item) => ({ id: item.id, radius: item.radius })),
+          links,
+        )
+    }
+    if (engine === 'schematic') {
+      return (layer, items, links) => {
+        const profile = selectProfile(this.profiles, layer)
+        return this.schematicLayout({
+          layer,
+          nodes: items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            radius: item.radius,
+            ...(item.kind === undefined ? {} : { kind: item.kind }),
+          })),
+          links,
+          ...(profile ? { profile } : {}),
+        })
+      }
+    }
+    return undefined
   }
 
   private layoutSignature(): string {
@@ -412,7 +461,7 @@ export class ForceRenderer {
 
   /** Arrange the nodes of each layer by the engine and put the layouts of the layers in a grid */
   private async layoutByEngine(
-    layerLayout: LayerLayoutFn,
+    layerLayout: LayerArrangeFn,
     token: number,
     started: number,
     signature: string,
@@ -429,10 +478,7 @@ export class ForceRenderer {
           const [source, target] = [this.itemOf(link.source)?.id, this.itemOf(link.target)?.id]
           return source && target && ids.has(source) && ids.has(target) ? [{ source, target }] : []
         })
-        const positions = await layerLayout(
-          items.map((item) => ({ id: item.id, radius: item.radius })),
-          links,
-        )
+        const positions = await layerLayout(layer, items, links)
         return { layer, items, positions }
       }),
     )

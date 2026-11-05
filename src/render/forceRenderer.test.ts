@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { DisplayGraph } from '../domain/graph'
 import { ForceRenderer, type Highlight } from './forceRenderer'
+import { parseProfiles } from './layout/schematic/profile'
+import type { SchematicLayerFn } from './layout/schematic/types'
 import type { LayerLayoutFn, LayoutStats, Positions } from './layout/types'
 
 /** nodes a, b, r; term-points of a (p1, p2) and b (p1); a/p1 - b/p1 are linked */
@@ -453,6 +455,117 @@ describe('ForceRenderer', () => {
       r.setEngine('stress')
       await flush()
       expect(layout).toHaveBeenCalledTimes(2)
+    })
+
+    describe('schematic engine', () => {
+      const lineSchematic = () =>
+        vi.fn<SchematicLayerFn>((input) =>
+          Promise.resolve(
+            new Map(input.nodes.map((n, i) => [n.id, { x: i * 100 + 50, y: 50 }])) as Positions,
+          ),
+        )
+      const makeSchematic = (
+        schematicLayout: SchematicLayerFn,
+        onLayout?: (stats: LayoutStats | null) => void,
+        profiles?: ReturnType<typeof parseProfiles>['profiles'],
+      ) => {
+        renderer.destroy()
+        renderer = new ForceRenderer(svg, callbacks, {
+          multiStart: 1,
+          engine: 'schematic',
+          schematicLayout,
+          ...(profiles ? { profiles } : {}),
+          onLayout,
+        })
+        return renderer
+      }
+
+      it('arranges each layer by the schematic layout (not by force or stress) and puts the nodes at the positions', async () => {
+        const stress = lineLayout()
+        const layout = lineSchematic()
+        renderer.destroy()
+        renderer = new ForceRenderer(svg, callbacks, {
+          multiStart: 1,
+          engine: 'schematic',
+          stressLayout: stress,
+          schematicLayout: layout,
+        })
+        renderer.setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        expect(stress).not.toHaveBeenCalled()
+        expect(layout.mock.calls.map((call) => call[0].layer)).toEqual(['l1', 'l2'])
+        expect(pos('l1/b')[0] - pos('l1/a')[0]).toBeCloseTo(100, 3)
+      })
+
+      it('passes the names of the nodes and the links in the layer', async () => {
+        const layout = lineSchematic()
+        makeSchematic(layout).setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        const first = layout.mock.calls[0]?.[0]
+        expect(first?.nodes.map((n) => n.id)).toEqual(['l1/a', 'l1/b'])
+        expect(first?.nodes.every((n) => typeof n.name === 'string' && n.radius > 0)).toBe(true)
+        expect(first?.links).toEqual([{ source: 'l1/a', target: 'l1/b' }])
+        expect(layout.mock.calls[1]?.[0].links).toEqual([])
+      })
+
+      it('passes the profile whose target accepts the layer (none if no profile)', async () => {
+        const { profiles } = parseProfiles('view: v\ntarget: { layer: l1 }\n')
+        const layout = lineSchematic()
+        makeSchematic(layout, undefined, profiles).setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        expect(layout.mock.calls[0]?.[0].profile?.view).toBe('v')
+        expect(layout.mock.calls[1]?.[0].profile).toBeUndefined()
+      })
+
+      it('arranges again when the profiles are changed', async () => {
+        const layout = lineSchematic()
+        const r = makeSchematic(layout)
+        r.setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        r.setProfiles(parseProfiles('view: v\n').profiles)
+        await flush()
+        expect(layout).toHaveBeenCalledTimes(4)
+        expect(layout.mock.calls[2]?.[0].profile?.view).toBe('v')
+      })
+
+      it('does not arrange again when the profiles are not changed, or the engine is not schematic', async () => {
+        const layout = lineSchematic()
+        const r = makeSchematic(layout)
+        r.setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        r.setProfiles([]) // empty to empty
+        const { profiles } = parseProfiles('view: v\n')
+        r.setProfiles(profiles)
+        r.setProfiles(profiles) // the same profiles
+        await flush()
+        expect(layout).toHaveBeenCalledTimes(4) // 2 layers, and the arrangement for the profiles
+
+        const stress = lineLayout()
+        make(stress).setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        renderer.setProfiles(parseProfiles('view: w\n').profiles)
+        await flush()
+        expect(stress).toHaveBeenCalledTimes(2)
+      })
+
+      it('reports the quality of the layout with the engine', async () => {
+        const reports: Array<LayoutStats | null> = []
+        makeSchematic(lineSchematic(), (stats) => reports.push(stats)).setGraph(collapsed, ['l1', 'l2'])
+        await flush()
+        expect(reports.at(-1)).toMatchObject({ engine: 'schematic', nodes: 3, links: 1 })
+      })
+
+      it('arranges with the real skeleton layout (no overlaps or crossings)', async () => {
+        renderer.destroy()
+        const reports: Array<LayoutStats | null> = []
+        renderer = new ForceRenderer(svg, callbacks, {
+          engine: 'schematic',
+          onLayout: (s) => reports.push(s),
+        })
+        renderer.setGraph(graph, ['l1', 'l2'])
+        await flush()
+        expect(reports.at(-1)).toMatchObject({ engine: 'schematic', crossings: 0, overlap: 0 })
+      })
     })
 
     it('reports the quality of the force layout too', () => {

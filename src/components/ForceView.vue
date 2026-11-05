@@ -4,6 +4,7 @@ import { useSelect } from '../composables/useSelect'
 import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
+import { loadProfiles, type ProfileSource } from '../render/layout/schematic/profileSource'
 import {
   LAYOUT_ENGINES,
   parseLayoutEngine,
@@ -14,7 +15,14 @@ import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 import { useViewStore } from '../stores/view'
 
-const props = defineProps<{ visibleLayers: string[]; engine: LayoutEngine }>()
+const props = defineProps<{
+  visibleLayers: string[]
+  engine: LayoutEngine
+  /** Name of the diagram profile for the schematic layout */
+  profile?: string
+  /** Source of the profiles (default: the profiles bundled in the app) */
+  profileSource?: ProfileSource
+}>()
 const emit = defineEmits<{ 'update:engine': [engine: LayoutEngine] }>()
 
 const topology = useTopologyStore()
@@ -24,6 +32,10 @@ const svgEl = ref<SVGSVGElement | null>(null)
 /** Result of the last layout (to compare the engines) and whether a layout is in progress */
 const stats = ref<LayoutStats | null>(null)
 const arranging = ref(false)
+/** Problem of loading the profile (the schematic layout is made without a profile then) */
+const profileError = ref('')
+/** The profile of the URL is loaded (or failed): the schematic layout waits for it, not to arrange twice */
+const profileSettled = ref(!props.profile)
 let renderer: ForceRenderer | null = null
 
 /** Stable order of all layers (colors do not change by showing/hiding layers) */
@@ -83,18 +95,64 @@ onMounted(() => {
       },
     },
   )
-  if (loaded.value) renderer.setGraph(graph.value, layerOrder.value)
-  renderer.setHighlight(highlight.value)
+  if (loaded.value) showGraph()
+  else renderer.setHighlight(highlight.value)
+  if (props.profile) void applyProfile(props.profile)
 })
-onBeforeUnmount(() => renderer?.destroy())
+onBeforeUnmount(() => {
+  profileToken++
+  renderer?.destroy()
+})
+
+/** To ignore the result of an old (asynchronous) loading of a profile */
+let profileToken = 0
+async function applyProfile(name: string | undefined): Promise<void> {
+  const token = ++profileToken
+  profileError.value = ''
+  profileSettled.value = !name
+  if (!name) {
+    renderer?.setProfiles([])
+    return
+  }
+  try {
+    const { profiles, warnings } = await loadProfiles(name, props.profileSource)
+    if (token !== profileToken) return
+    if (warnings.length > 0) profileError.value = `profile '${name}': ${warnings.join('; ')}`
+    renderer?.setProfiles(profiles)
+  } catch (error) {
+    if (token !== profileToken) return
+    profileError.value = `profile '${name}': ${error instanceof Error ? error.message : String(error)}`
+    renderer?.setProfiles([])
+  }
+  profileSettled.value = true
+}
+watch(
+  () => props.profile,
+  (name) => void applyProfile(name),
+)
 
 /** All the visible layers are loaded (the layout is made after that, not for each layer) */
-const loaded = computed(() => props.visibleLayers.every((id) => topology.layerData[id]))
+let graphShown = false
+function showGraph(): void {
+  graphShown = true
+  renderer?.setGraph(graph.value, layerOrder.value)
+  renderer?.setHighlight(highlight.value)
+}
+
+const loaded = computed(
+  () =>
+    props.visibleLayers.every((id) => topology.layerData[id]) &&
+    (props.engine !== 'schematic' || profileSettled.value),
+)
+// the first layout which waited for the profile (a profile changed later is arranged by setProfiles)
+watch(profileSettled, (settled) => {
+  if (!settled || graphShown || !loaded.value) return
+  showGraph()
+})
 
 watch(graph, () => {
   if (!loaded.value) return
-  renderer?.setGraph(graph.value, layerOrder.value)
-  renderer?.setHighlight(highlight.value)
+  showGraph()
 })
 watch(highlight, () => renderer?.setHighlight(highlight.value))
 watch(
@@ -127,6 +185,7 @@ function onEngineChange(event: Event): void {
       <span class="stats" data-testid="layout-stats" :data-engine="stats?.engine">{{
         arranging ? 'arranging...' : statsText
       }}</span>
+      <span v-if="profileError" class="error" data-testid="profile-error">{{ profileError }}</span>
     </div>
     <svg ref="svgEl" class="force-svg" data-testid="force-svg" />
   </div>
@@ -141,6 +200,9 @@ function onEngineChange(event: Event): void {
 }
 .force-view .stats {
   opacity: 0.7;
+  font-size: 0.8em;
+}
+.force-view .toolbar .error {
   font-size: 0.8em;
 }
 .force-svg {

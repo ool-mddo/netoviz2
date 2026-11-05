@@ -2,12 +2,14 @@
  * Layout engines:
  * - force: d3-force (a simulation; the layout is made several times from random starts and the best one is used)
  * - stress: stress majorization (own implementation, see stress.ts)
+ * - schematic: layout for network diagrams driven by a diagram profile (see schematic/)
  */
-export type LayoutEngine = 'force' | 'stress'
+export type LayoutEngine = 'force' | 'stress' | 'schematic'
 
 export const LAYOUT_ENGINES: ReadonlyArray<{ id: LayoutEngine; label: string }> = [
   { id: 'force', label: 'force (d3-force)' },
   { id: 'stress', label: 'stress' },
+  { id: 'schematic', label: 'schematic' },
 ]
 
 /** Layout engine used when it is not specified */

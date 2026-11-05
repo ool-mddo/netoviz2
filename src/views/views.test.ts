@@ -216,6 +216,17 @@ describe('TopologyView', () => {
       expect(selected(wrapper)).toEqual(['force'])
     })
 
+    it('uses the schematic engine in the URL query', async () => {
+      const wrapper = await mountView('/nw/ss?layout=schematic')
+      expect(selected(wrapper)).toEqual(['schematic'])
+    })
+
+    it('passes the profile in the URL query (?profile=) to the view: a profile which is not found is told', async () => {
+      const wrapper = await mountView('/nw/ss?layout=schematic&profile=nothing')
+      await flushPromises()
+      expect(wrapper.get('[data-testid=profile-error]').text()).toContain("profile 'nothing' is not found")
+    })
+
     it('ignores an unknown engine in the URL query (e.g. an engine which was removed)', async () => {
       const wrapper = await mountView('/nw/ss?layout=elk-stress&compare=elk-layered')
       expect(selected(wrapper)).toEqual(['stress'])

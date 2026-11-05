@@ -6,12 +6,17 @@ import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 import { useViewStore } from '../stores/view'
 import { attributesData, layer1Data, layer2Data, makeSummary, supportsData } from '../test/fixtures'
+import { profileSourceOf } from '../render/layout/schematic/profileSource'
 import ForceView from './ForceView.vue'
 
 vi.mock('../api/client')
 const mocked = vi.mocked(api)
 
-async function mountView(visibleLayers = ['layer1', 'layer2'], loadedLayers = visibleLayers) {
+async function mountView(
+  visibleLayers = ['layer1', 'layer2'],
+  loadedLayers = visibleLayers,
+  extraProps: Record<string, unknown> = {},
+) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const topology = useTopologyStore()
@@ -19,7 +24,7 @@ async function mountView(visibleLayers = ['layer1', 'layer2'], loadedLayers = vi
   await Promise.all(loadedLayers.map((id) => topology.loadLayer(id)))
   await topology.ensureSupports()
   const wrapper = mount(ForceView, {
-    props: { visibleLayers, engine: 'force' as const },
+    props: { visibleLayers, engine: 'force' as const, ...extraProps },
     global: { plugins: [pinia] },
     attachTo: document.body,
   })
@@ -166,7 +171,11 @@ describe('ForceView', () => {
       current = wrapper
       const select = wrapper.get('[data-testid=layout-select]')
       expect((select.element as HTMLSelectElement).value).toBe('force')
-      expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual(['force', 'stress'])
+      expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual([
+        'force',
+        'stress',
+        'schematic',
+      ])
       await select.setValue('stress')
       expect(wrapper.emitted('update:engine')?.[0]).toEqual(['stress'])
     })
@@ -187,6 +196,119 @@ describe('ForceView', () => {
         expect(wrapper.get('[data-testid=layout-stats]').attributes('data-engine')).toBe('stress'),
       )
       expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
+    })
+  })
+
+  describe('diagram profile', () => {
+    const profileSource = profileSourceOf({
+      'ok.yaml': () => Promise.resolve('view: v\ntarget: { layer: layer1 }\n'),
+      'warn.yaml': () => Promise.resolve('view: v\naxes: {}\n'),
+      'broken.yaml': () => Promise.resolve('view: [\n'),
+    })
+    const errorText = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.find('[data-testid=profile-error]').text()
+
+    it('shows no message when the profile is loaded', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'ok',
+        profileSource,
+      })
+      current = wrapper
+      await flushPromises()
+      expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(false)
+    })
+
+    it('tells that the profile is not found or invalid (the layout works without the profile)', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'nothing',
+        profileSource,
+      })
+      current = wrapper
+      await flushPromises()
+      expect(errorText(wrapper)).toContain("profile 'nothing' is not found")
+      await wrapper.setProps({ profile: 'broken' })
+      await flushPromises()
+      expect(errorText(wrapper)).toContain("profile 'broken'")
+      expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
+    })
+
+    /** Source whose loading is finished by the test */
+    const deferredSource = () => {
+      const resolvers = new Map<string, (text: string | undefined) => void>()
+      const source = (name: string) =>
+        new Promise<string | undefined>((resolve) => resolvers.set(name, resolve))
+      return { source, resolve: (name: string, text?: string) => resolvers.get(name)?.(text) }
+    }
+
+    it('waits for the profile to arrange the nodes (the schematic layout is made once, with the profile)', async () => {
+      const { source, resolve } = deferredSource()
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'ok',
+        profileSource: source,
+      })
+      current = wrapper
+      expect(count(wrapper, 'g.node:not(.tp)')).toBe(0)
+      resolve('ok', 'view: v\n')
+      await flushPromises()
+      await vi.waitFor(() => expect(count(wrapper, 'g.node:not(.tp)')).toBe(3))
+    })
+
+    it('arranges even when the profile is not found (without the profile)', async () => {
+      const { source, resolve } = deferredSource()
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'nothing',
+        profileSource: source,
+      })
+      current = wrapper
+      resolve('nothing', undefined)
+      await flushPromises()
+      await vi.waitFor(() => expect(count(wrapper, 'g.node:not(.tp)')).toBe(3))
+    })
+
+    it('ignores the result of an old profile (a profile which is loaded later than the newer one)', async () => {
+      const { source, resolve } = deferredSource()
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'a',
+        profileSource: source,
+      })
+      current = wrapper
+      await wrapper.setProps({ profile: 'b' })
+      resolve('b', 'view: b\n')
+      await flushPromises()
+      resolve('a', 'view: a\naxes: {}\n') // with a warning, if it were used
+      await flushPromises()
+      expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(false)
+    })
+
+    it('does not use the result of a profile after it is unmounted', async () => {
+      const { source, resolve } = deferredSource()
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'a',
+        profileSource: source,
+      })
+      wrapper.unmount()
+      resolve('a', 'view: a\n')
+      await flushPromises() // no error
+    })
+
+    it('tells the warnings of the profile, and clears the message when the profile is removed', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'warn',
+        profileSource,
+      })
+      current = wrapper
+      await flushPromises()
+      expect(errorText(wrapper)).toContain("unknown key 'axes'")
+      await wrapper.setProps({ profile: undefined })
+      await flushPromises()
+      expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(false)
     })
   })
 })
