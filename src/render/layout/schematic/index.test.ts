@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { layoutQuality } from '../quality'
 import { mddoFwLayer1 } from '../../../test/mddoFwLayer1'
+import { mddoMregnwLayer1, mddoBgpLayer1, mddoNetworkLayer1 } from '../../../test/sampleLayers'
 import { layoutSchematic } from './index'
+import { parseProfiles } from './profile'
+import type { SchematicReport } from './types'
 import { loadProfiles } from './profileSource'
 
 const SITES = ['a', 'b', 'c']
@@ -85,5 +88,100 @@ describe('layoutSchematic (mddo-fw layer1 with the profile)', () => {
       input.links,
     )
     expect(quality.crossings).toBeLessThanOrEqual(3)
+  })
+})
+
+/** Names by the rows (from the top) and the columns (from the left) of a layout: the relative order of the nodes */
+function rowsOf(positions: Map<string, { x: number; y: number }>): string[][] {
+  const byY = new Map<number, Array<[string, number]>>()
+  for (const [id, p] of positions) byY.set(p.y, [...(byY.get(p.y) ?? []), [id.replace('layer1/', ''), p.x]])
+  return [...byY]
+    .sort(([a], [b]) => a - b)
+    .map(([, row]) => row.sort((a, b) => a[1] - b[1]).map(([name]) => name))
+}
+
+describe('layoutSchematic without a profile (inferred)', () => {
+  it('mddo-fw: the same relative order of the nodes as the hand-written profile', async () => {
+    const input = mddoFwLayer1()
+    const { profiles } = await loadProfiles('mddo-fw')
+    const written = await layoutSchematic({ ...input, profile: profiles[0]! })
+    const inferred = await layoutSchematic(input)
+    expect(rowsOf(inferred)).toEqual(rowsOf(written))
+  })
+
+  it('mddo-mregnw and mddo_network: the upstream (pe) is on the top and the servers at the bottom, by site', async () => {
+    for (const input of [mddoMregnwLayer1(), mddoNetworkLayer1()]) {
+      const rows = rowsOf(await layoutSchematic(input))
+      expect(rows.map((row) => row[0]?.replace(/^region[a-z]-/, '').replace(/\d+$/, ''))).toEqual([
+        'pe',
+        'ce',
+        'acc',
+        'svr',
+      ])
+      expect(rows[0]?.[0]?.startsWith('regiona-')).toBe(true) // sites from the left (by the names)
+      expect(rows[0]?.at(-1)?.startsWith('regione-') || rows[0]?.at(-1)?.startsWith('regionb-')).toBe(true)
+    }
+  })
+
+  it('reports the profile is inferred with the draft, and no exceptions for the regular layer', async () => {
+    const reports: SchematicReport[] = []
+    await layoutSchematic({ ...mddoFwLayer1(), report: (r) => reports.push(r) })
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toMatchObject({ layer: 'layer1', source: 'inferred', violations: [] })
+    expect(reports[0]?.draft).toContain('view: inferred')
+  })
+
+  it('reports the nodes which do not fit the inferred shape as exceptions', async () => {
+    const input = mddoFwLayer1()
+    const odd = { id: 'layer1/odd', name: 'odd.name', radius: 11 }
+    const reports: SchematicReport[] = []
+    const positions = await layoutSchematic({
+      ...input,
+      nodes: [...input.nodes, odd],
+      report: (r) => reports.push(r),
+    })
+    expect(reports[0]?.violations.map((v) => [v.id, v.code])).toEqual([['layer1/odd', 'unclassified']])
+    expect(positions.has('layer1/odd')).toBe(true) // the node is still put (in the row after the last tier)
+  })
+
+  it('arranges by stress and reports "none" when nothing can be inferred (a star: mddo-bgp layer1)', async () => {
+    const reports: SchematicReport[] = []
+    const input = mddoBgpLayer1()
+    const positions = await layoutSchematic({ ...input, report: (r) => reports.push(r) })
+    expect(reports).toEqual([{ layer: 'layer1', source: 'none', violations: [] }])
+    expect(positions.size).toBe(input.nodes.length)
+  })
+})
+
+describe('layoutSchematic with a given profile', () => {
+  it('uses the given profile (not the inferred one) and reports the unpaired nodes', async () => {
+    const input = mddoFwLayer1()
+    const { profiles } = await loadProfiles('mddo-fw')
+    const nodes = input.nodes.filter((n) => n.name !== 'site-a-br-2') // site-a-br-1 has no partner
+    const reports: SchematicReport[] = []
+    await layoutSchematic({ ...input, nodes, profile: profiles[0]!, report: (r) => reports.push(r) })
+    expect(reports[0]).toMatchObject({ source: 'profile' })
+    expect(reports[0]?.draft).toBeUndefined()
+    expect(reports[0]?.violations.map((v) => [v.id, v.code])).toEqual([['layer1/site-a-br-1', 'unpaired']])
+  })
+
+  it('reports "none" when the given profile does not fit and nothing can be inferred', async () => {
+    const unrelated = parseProfiles(
+      "view: v\ntiers: [x]\nname: '^zzz$'\nrules:\n  - { select: '[role=x]', tier: x }\n",
+    ).profiles[0]!
+    const reports: SchematicReport[] = []
+    const input = mddoBgpLayer1()
+    const positions = await layoutSchematic({ ...input, profile: unrelated, report: (r) => reports.push(r) })
+    expect(reports).toEqual([{ layer: 'layer1', source: 'none', violations: [] }])
+    expect(positions.size).toBe(input.nodes.length)
+  })
+
+  it('infers the profile when the given one gives no tier to any node (it does not fit the layer)', async () => {
+    const reports: SchematicReport[] = []
+    const unrelated = parseProfiles(
+      "view: v\ntiers: [x]\nname: '^zzz$'\nrules:\n  - { select: '[role=x]', tier: x }\n",
+    ).profiles[0]!
+    await layoutSchematic({ ...mddoFwLayer1(), profile: unrelated, report: (r) => reports.push(r) })
+    expect(reports[0]).toMatchObject({ source: 'inferred' })
   })
 })

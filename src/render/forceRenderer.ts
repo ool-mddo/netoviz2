@@ -20,7 +20,7 @@ import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
 import { layoutSchematic } from './layout/schematic'
 import { selectProfile } from './layout/schematic/profile'
-import type { DiagramProfile, SchematicLayerFn } from './layout/schematic/types'
+import type { DiagramProfile, SchematicLayerFn, SchematicReport } from './layout/schematic/types'
 import { type LayerLayoutFn, type LayoutEngine, type LayoutStats, type Positions } from './layout/types'
 
 /** Colors of layers (color-blind friendly palette) */
@@ -113,6 +113,8 @@ export interface RendererOptions {
   profiles?: readonly DiagramProfile[]
   /** Called with null when a layout is started (asynchronous) and with the result when it is done */
   onLayout?: (stats: LayoutStats | null) => void
+  /** Called for each layer with what the schematic layout was made from and the exceptions (of the latest layout) */
+  onSchematicReport?: (report: SchematicReport) => void
 }
 
 /** IDs are IDs of shown elements (see displayIdOf) */
@@ -148,6 +150,7 @@ export class ForceRenderer {
   private readonly schematicLayout: SchematicLayerFn
   private profiles: readonly DiagramProfile[]
   private readonly onLayout: (stats: LayoutStats | null) => void
+  private readonly onSchematicReport: (report: SchematicReport) => void
   private graph: DisplayGraph = { nodes: [], links: [] }
   /** To ignore the result of an old (asynchronous) layout */
   private layoutToken = 0
@@ -192,6 +195,7 @@ export class ForceRenderer {
     this.schematicLayout = options.schematicLayout ?? layoutSchematic
     this.profiles = options.profiles ?? []
     this.onLayout = options.onLayout ?? (() => undefined)
+    this.onSchematicReport = options.onSchematicReport ?? (() => undefined)
     const svgSelection = select(svg)
     this.root = svgSelection.append('g').attr('class', 'viewport')
     this.linkLayer = this.root.append('g').attr('class', 'links')
@@ -398,7 +402,7 @@ export class ForceRenderer {
     const token = ++this.layoutToken
     const started = performance.now()
     this.layoutStarted = started
-    const layerLayout = this.layerLayoutOf(this.engine)
+    const layerLayout = this.layerLayoutOf(this.engine, token)
     if (!layerLayout) {
       this.layout()
       this.reportLayout(started)
@@ -424,7 +428,7 @@ export class ForceRenderer {
   }
 
   /** Function to arrange the nodes of a layer by the engine (undefined for force: it is made by the simulation) */
-  private layerLayoutOf(engine: LayoutEngine): LayerArrangeFn | undefined {
+  private layerLayoutOf(engine: LayoutEngine, token: number): LayerArrangeFn | undefined {
     if (engine === 'stress') {
       return (_layer, items, links) =>
         this.stressLayout(
@@ -444,6 +448,10 @@ export class ForceRenderer {
             ...(item.kind === undefined ? {} : { kind: item.kind }),
           })),
           links,
+          // the report of an old layout (a newer one has been started) is not told
+          report: (report) => {
+            if (token === this.layoutToken) this.onSchematicReport(report)
+          },
           ...(profile ? { profile } : {}),
         })
       }

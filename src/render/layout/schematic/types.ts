@@ -47,12 +47,32 @@ export interface SchematicNode {
   radius: number
 }
 
+/** Exception from the pattern which the profile expresses (it is told to the user: "emphasize the exceptions") */
+export interface SchematicViolation {
+  id: string
+  /** unclassified: no tier is given to the node. unpaired: the node has no partner of the redundant pair. */
+  code: 'unclassified' | 'unpaired'
+  message: string
+}
+
+/** What the schematic layout of a layer was made from, and the exceptions */
+export interface SchematicReport {
+  layer: string
+  /** profile: the given profile. inferred: the profile inferred from the names and the links. none: no profile (stress) */
+  source: 'profile' | 'inferred' | 'none'
+  violations: SchematicViolation[]
+  /** The inferred profile as YAML (the draft which a person can correct and keep) */
+  draft?: string
+}
+
 export interface SchematicLayerInput {
   layer: string
   nodes: readonly SchematicNode[]
   links: ReadonlyArray<{ source: string; target: string }>
-  /** Profile for this layer (none: the layout is made without a profile) */
+  /** Profile for this layer (none: the profile is inferred from the names and the links) */
   profile?: DiagramProfile
+  /** Called with what the layout was made from and the exceptions */
+  report?: (report: SchematicReport) => void
 }
 
 /** Function to arrange the nodes of a layer by the schematic engine (centers of the nodes) */

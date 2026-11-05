@@ -199,6 +199,29 @@ describe('ForceView', () => {
     })
   })
 
+  describe('report of the schematic layout', () => {
+    it('shows what the layers were made from when the engine is schematic (here: no profile can be inferred)', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, { engine: 'schematic' })
+      current = wrapper
+      await vi.waitFor(() => expect(wrapper.find('[data-testid=schematic-report]').exists()).toBe(true))
+      expect(wrapper.findAll('[data-testid=report-source]').map((e) => e.text())).toEqual([
+        'no profile (stress layout)',
+        'no profile (stress layout)',
+      ])
+    })
+
+    it('does not show it for the other engines, nor after the engine is changed to them', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, { engine: 'schematic' })
+      current = wrapper
+      await vi.waitFor(() => expect(wrapper.find('[data-testid=schematic-report]').exists()).toBe(true))
+      await wrapper.setProps({ engine: 'stress' })
+      expect(wrapper.find('[data-testid=schematic-report]').exists()).toBe(false)
+      const other = await mountView()
+      expect(other.wrapper.find('[data-testid=schematic-report]').exists()).toBe(false)
+      other.wrapper.unmount()
+    })
+  })
+
   describe('diagram profile', () => {
     const profileSource = profileSourceOf({
       'ok.yaml': () => Promise.resolve('view: v\ntarget: { layer: layer1 }\n'),

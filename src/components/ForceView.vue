@@ -5,6 +5,8 @@ import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
 import { loadProfiles, type ProfileSource } from '../render/layout/schematic/profileSource'
+import type { SchematicReport } from '../render/layout/schematic/types'
+import SchematicReportPanel from './SchematicReportPanel.vue'
 import {
   LAYOUT_ENGINES,
   parseLayoutEngine,
@@ -32,6 +34,8 @@ const svgEl = ref<SVGSVGElement | null>(null)
 /** Result of the last layout (to compare the engines) and whether a layout is in progress */
 const stats = ref<LayoutStats | null>(null)
 const arranging = ref(false)
+/** What the schematic layout was made from and the exceptions, for each layer (of the latest layout) */
+const reports = ref<SchematicReport[]>([])
 /** Problem of loading the profile (the schematic layout is made without a profile then) */
 const profileError = ref('')
 /** The profile of the URL is loaded (or failed): the schematic layout waits for it, not to arrange twice */
@@ -92,6 +96,12 @@ onMounted(() => {
       onLayout: (result) => {
         arranging.value = result === null
         if (result) stats.value = result
+        else reports.value = [] // a new layout is started: the reports come with its result
+      },
+      onSchematicReport: (report) => {
+        reports.value = [...reports.value.filter((r) => r.layer !== report.layer), report].sort((a, b) =>
+          a.layer.localeCompare(b.layer, 'en', { numeric: true }),
+        )
       },
     },
   )
@@ -187,6 +197,7 @@ function onEngineChange(event: Event): void {
       }}</span>
       <span v-if="profileError" class="error" data-testid="profile-error">{{ profileError }}</span>
     </div>
+    <SchematicReportPanel v-if="engine === 'schematic' && reports.length > 0" :reports="reports" />
     <svg ref="svgEl" class="force-svg" data-testid="force-svg" />
   </div>
 </template>

@@ -548,6 +548,28 @@ describe('ForceRenderer', () => {
         expect(stress).toHaveBeenCalledTimes(2)
       })
 
+      it('tells the report of each layer, but not the one which comes after a newer layout is started', async () => {
+        const reports: string[] = []
+        renderer.destroy()
+        let first = true
+        renderer = new ForceRenderer(svg, callbacks, {
+          multiStart: 1,
+          engine: 'schematic',
+          schematicLayout: async (input) => {
+            const tag = first ? 'old' : 'new'
+            await Promise.resolve() // the report comes later than the start of the next layout
+            input.report?.({ layer: `${input.layer}:${tag}`, source: 'none', violations: [] })
+            return new Map(input.nodes.map((n, i) => [n.id, { x: i * 100, y: 0 }])) as Positions
+          },
+          onSchematicReport: (r) => reports.push(r.layer),
+        })
+        renderer.setGraph(collapsed, ['l1', 'l2'])
+        first = false
+        renderer.setGraph({ nodes: collapsed.nodes.slice(0, 1), links: [] }, ['l1', 'l2']) // a newer layout
+        await flush()
+        expect(reports).toEqual(['l1:new'])
+      })
+
       it('reports the quality of the layout with the engine', async () => {
         const reports: Array<LayoutStats | null> = []
         makeSchematic(lineSchematic(), (stats) => reports.push(stats)).setGraph(collapsed, ['l1', 'l2'])

@@ -20,6 +20,8 @@ export interface Annotated {
   annotations: Map<string, NodeAnnotation>
   /** Nodes which no rule gave a tier to (they cannot be put in a row) */
   unclassified: string[]
+  /** Nodes which a rule made to be a pair but which have no partner */
+  unpaired: string[]
 }
 
 function matches(
@@ -89,5 +91,10 @@ export function annotate(nodes: readonly SchematicNode[], profile: DiagramProfil
   }
 
   const unclassified = [...annotations.values()].filter((a) => a.tier === undefined).map((a) => a.id)
-  return { annotations, unclassified }
+  // (a node without a tier is reported as unclassified only)
+  const unpaired = [...pairBy.keys()].filter((id) => {
+    const annotation = annotations.get(id)
+    return annotation?.pair === undefined && annotation?.tier !== undefined
+  })
+  return { annotations, unclassified, unpaired }
 }

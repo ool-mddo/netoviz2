@@ -107,6 +107,29 @@ rules:
     expect(annotations.get('l/other')?.tier).toBeUndefined()
   })
 
+  it('reports a node without a tier as unclassified only (not as unpaired, too)', () => {
+    const profile = profileOf(`
+view: v
+name: '^(?<role>[a-z]+)-(?<n>\\d)$'
+rules:
+  - { select: '*', pair: { by: n, primary: '1' } }
+`)
+    const { unclassified, unpaired } = annotate([node('r-1')], profile)
+    expect(unclassified).toEqual(['l/r-1'])
+    expect(unpaired).toEqual([])
+  })
+
+  it('reports a node with a tier and a pair rule but without a partner as unpaired', () => {
+    const profile = profileOf(`
+view: v
+tiers: [t]
+name: '^(?<role>[a-z]+)-(?<n>\\d)$'
+rules:
+  - { select: '*', tier: t, pair: { by: n, primary: '1' } }
+`)
+    expect(annotate([node('r-1'), node('s-1'), node('s-2')], profile).unpaired).toEqual(['l/r-1'])
+  })
+
   it('does not make a pair of a node without a partner', () => {
     const profile = profileOf(`
 view: v
