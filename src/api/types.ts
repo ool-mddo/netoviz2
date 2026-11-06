@@ -110,3 +110,19 @@ export interface IndexEntry {
   snapshot: string
   file: string
 }
+
+/** A diagram profile file of a network (YAML converted to JSON by the backend; see data format 4.5) */
+export interface ProfileFile {
+  /** File name without the extension (`?profile=<name>` selects it) */
+  name: string
+  etag?: string
+  /** One value for each document (`---` separated) of the file */
+  documents: unknown[]
+  /** Error of the file (then `documents` is empty) */
+  error?: string
+}
+
+export interface ProfilesData {
+  network: string
+  profiles: ProfileFile[]
+}

@@ -18,7 +18,23 @@ import { radiusForPorts, spreadAngles } from '../domain/ports'
 import { layoutWithStress } from './layout/stress'
 import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
-import { type LayerLayoutFn, type LayoutEngine, type LayoutStats } from './layout/types'
+import { layoutSchematic } from './layout/schematic'
+import { routeAround, type Obstacle, type RouteEnd, type RouteRequest } from './linkRouter'
+import { roundedPolyline } from './path'
+import { selectProfile } from './layout/schematic/profile'
+import type {
+  DiagramProfile,
+  SchematicBase,
+  SchematicLayerFn,
+  SchematicReport,
+} from './layout/schematic/types'
+import {
+  type LayerLayoutFn,
+  type LayoutEngine,
+  type LayoutStats,
+  type Position,
+  type Positions,
+} from './layout/types'
 
 /** Colors of layers (color-blind friendly palette) */
 export const LAYER_COLORS = [
@@ -50,6 +66,10 @@ const DRAG_ANCHOR_STRENGTH = 0.12
 const DRAG_CHARGE_SCALE = 0.3
 const DRAG_VELOCITY_DECAY = 0.6
 const NODE_RADIUS = 11
+/** Radius of the corners of the links which go around the nodes */
+const ROUTE_CORNER = 6
+/** The making of the routes which takes longer than this (ms) is not done on every frame */
+const ROUTE_BUDGET_MS = 6
 const PORT_RADIUS = 4.5
 /** Length of the arc of a node circle reserved for a port */
 const PORT_ARC = 14
@@ -83,6 +103,13 @@ const DEFAULT_MULTISTART = 6
 type Item = SimulationNodeDatum & DisplayNode & { radius: number; angle?: number }
 type SimLink = SimulationLinkDatum<Item> & { source: string | Item; target: string | Item; count: number }
 
+/** Arrange the nodes of a layer (the layer ID, the nodes and the links in the layer) */
+type LayerArrangeFn = (
+  layer: string,
+  items: readonly Item[],
+  links: ReadonlyArray<{ source: string; target: string }>,
+) => Promise<Positions>
+
 export interface RendererCallbacks {
   /** Click on a node/term-point (id) or on the background (null) */
   onSelect: (id: string | null) => void
@@ -97,8 +124,16 @@ export interface RendererOptions {
   engine?: LayoutEngine
   /** Function to arrange with the own stress layout (default: layoutWithStress) */
   stressLayout?: LayerLayoutFn
+  /** Function to arrange with the schematic layout (default: layoutSchematic) */
+  schematicLayout?: SchematicLayerFn
+  /** Diagram profiles for the schematic layout (see setProfiles) */
+  profiles?: readonly DiagramProfile[]
+  /** Lower layers to inherit the arrangement from, by the layer ID (see setSchematicBases) */
+  schematicBases?: ReadonlyMap<string, readonly SchematicBase[]>
   /** Called with null when a layout is started (asynchronous) and with the result when it is done */
   onLayout?: (stats: LayoutStats | null) => void
+  /** Called for each layer with what the schematic layout was made from and the exceptions (of the latest layout) */
+  onSchematicReport?: (report: SchematicReport) => void
 }
 
 /** IDs are IDs of shown elements (see displayIdOf) */
@@ -131,7 +166,27 @@ export class ForceRenderer {
   private readonly multiStart: number
   private engine: LayoutEngine
   private readonly stressLayout: LayerLayoutFn
+  private readonly schematicLayout: SchematicLayerFn
+  private profiles: readonly DiagramProfile[]
+  private schematicBases: ReadonlyMap<string, readonly SchematicBase[]>
+  /** Changed when the lower layers are changed (to arrange the same graph again with them) */
+  private basesVersion = 0
+  /** Routes of the links which a straight line would pass through a node or a port (waypoints, by the ID of the link) */
+  private routes = new Map<string, Position[]>()
+  /** The positions which the routes were made from (to make them again only if something moved) */
+  private routesFor = ''
+  /** How long the last making of the routes took (ms), and when it was done: a heavy one is not done on every frame */
+  private routeCost = 0
+  private routesAt = 0
+  private routeTimer: ReturnType<typeof setTimeout> | null = null
+  /** Angles of the ports of the links which go around something: toward where the route leaves the node (see updatePortHints) */
+  private portHints = new Map<string, number>()
+  /** The nodes whose ports are not turned toward the routes: it made a link which could be straight go around */
+  private hintsOff = new Set<string>()
+  /** The links with ports which a straight line is clear for between the nodes (their ports are toward the other node) */
+  private straightLinks = new Set<string>()
   private readonly onLayout: (stats: LayoutStats | null) => void
+  private readonly onSchematicReport: (report: SchematicReport) => void
   private graph: DisplayGraph = { nodes: [], links: [] }
   /** To ignore the result of an old (asynchronous) layout */
   private layoutToken = 0
@@ -173,7 +228,11 @@ export class ForceRenderer {
     this.engine = options.engine ?? 'force'
     this.stressLayout =
       options.stressLayout ?? ((nodes, links) => Promise.resolve(layoutWithStress(nodes, links)))
+    this.schematicLayout = options.schematicLayout ?? layoutSchematic
+    this.profiles = options.profiles ?? []
+    this.schematicBases = options.schematicBases ?? new Map()
     this.onLayout = options.onLayout ?? (() => undefined)
+    this.onSchematicReport = options.onSchematicReport ?? (() => undefined)
     const svgSelection = select(svg)
     this.root = svgSelection.append('g').attr('class', 'viewport')
     this.linkLayer = this.root.append('g').attr('class', 'links')
@@ -233,6 +292,7 @@ export class ForceRenderer {
     const shown = new Set(graph.nodes.map((node) => node.layer))
     this.areaIndex = new Map(layerOrder.filter((layer) => shown.has(layer)).map((layer, i) => [layer, i]))
 
+    this.routesAt = Number.NEGATIVE_INFINITY // (the routes of a new graph are made at once)
     this.buildItems(graph)
     this.simulation.nodes(this.bodies)
     this.simulation.force<ReturnType<typeof forceLink<Item, SimLink>>>('link')?.links(this.simLinks)
@@ -251,6 +311,24 @@ export class ForceRenderer {
     if (engine === this.engine) return
     this.engine = engine
     this.relayout()
+  }
+
+  /** Change the diagram profiles (the schematic layout is made again with them) */
+  setProfiles(profiles: readonly DiagramProfile[]): void {
+    // nothing changes without profiles (and a relayout forgets the positions the user moved)
+    if (profiles === this.profiles || (profiles.length === 0 && this.profiles.length === 0)) return
+    this.profiles = profiles
+    if (this.engine === 'schematic') this.relayout()
+  }
+
+  /**
+   * Change the lower layers which the arrangement of the layers is inherited from. It does not arrange: the layout
+   * which comes next (setGraph, setEngine) is made with them, even for the same graph (they are in the signature).
+   */
+  setSchematicBases(bases: ReadonlyMap<string, readonly SchematicBase[]>): void {
+    if (bases === this.schematicBases) return
+    this.schematicBases = bases
+    this.basesVersion++
   }
 
   /** Arrange all the nodes again from scratch (the known positions are forgotten) */
@@ -272,10 +350,11 @@ export class ForceRenderer {
   /** Move the viewport to see all elements */
   fit(): void {
     if (this.bodies.length === 0) return
-    const xs = this.bodies.map((n) => (n.x ?? 0) - n.radius)
-    const xe = this.bodies.map((n) => (n.x ?? 0) + n.radius)
-    const ys = this.bodies.map((n) => (n.y ?? 0) - n.radius)
-    const ye = this.bodies.map((n) => (n.y ?? 0) + n.radius)
+    const waypoints = [...this.routes.values()].flat()
+    const xs = this.bodies.map((n) => (n.x ?? 0) - n.radius).concat(waypoints.map((p) => p.x))
+    const xe = this.bodies.map((n) => (n.x ?? 0) + n.radius).concat(waypoints.map((p) => p.x))
+    const ys = this.bodies.map((n) => (n.y ?? 0) - n.radius).concat(waypoints.map((p) => p.y))
+    const ye = this.bodies.map((n) => (n.y ?? 0) + n.radius).concat(waypoints.map((p) => p.y))
     const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xe), Math.min(...ys), Math.max(...ye)]
     const width = this.svg.clientWidth || 800
     const height = this.svg.clientHeight || 600
@@ -302,6 +381,8 @@ export class ForceRenderer {
 
   destroy(): void {
     this.simulation.stop()
+    if (this.routeTimer) clearTimeout(this.routeTimer)
+    this.routeTimer = null
     const svgSelection = select(this.svg)
     svgSelection.on('.zoom', null).on('click.background', null)
     this.svg.classList.remove('zoomed-in')
@@ -342,6 +423,8 @@ export class ForceRenderer {
     }
 
     this.drawLinks = graph.links.filter((link) => link.type === 'link')
+    this.hintsOff = new Set()
+    this.routesFor = '' // (the links may have changed with the same nodes: the routes are made again)
     const nodeOf = (id: string) => this.itemById.get(id)?.parent ?? id
     const bundles = new Map<string, SimLink>()
     this.peersOf = new Map()
@@ -372,7 +455,7 @@ export class ForceRenderer {
     const token = ++this.layoutToken
     const started = performance.now()
     this.layoutStarted = started
-    const layerLayout = this.layerLayoutOf(this.engine)
+    const layerLayout = this.layerLayoutOf(this.engine, token)
     if (!layerLayout) {
       this.layout()
       this.reportLayout(started)
@@ -398,8 +481,40 @@ export class ForceRenderer {
   }
 
   /** Function to arrange the nodes of a layer by the engine (undefined for force: it is made by the simulation) */
-  private layerLayoutOf(engine: LayoutEngine): LayerLayoutFn | undefined {
-    return engine === 'stress' ? this.stressLayout : undefined
+  private layerLayoutOf(engine: LayoutEngine, token: number): LayerArrangeFn | undefined {
+    if (engine === 'stress') {
+      return (_layer, items, links) =>
+        this.stressLayout(
+          items.map((item) => ({ id: item.id, radius: item.radius })),
+          links,
+        )
+    }
+    if (engine === 'schematic') {
+      return (layer, items, links) => {
+        const profile = selectProfile(this.profiles, layer)
+        const bases = (this.schematicBases.get(layer) ?? []).map((base) => {
+          const baseProfile = selectProfile(this.profiles, base.layer)
+          return baseProfile ? { ...base, profile: baseProfile } : base
+        })
+        return this.schematicLayout({
+          layer,
+          nodes: items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            radius: item.radius,
+            ...(item.kind === undefined ? {} : { kind: item.kind }),
+          })),
+          links,
+          ...(bases.length > 0 ? { bases } : {}),
+          // the report of an old layout (a newer one has been started) is not told
+          report: (report) => {
+            if (token === this.layoutToken) this.onSchematicReport(report)
+          },
+          ...(profile ? { profile } : {}),
+        })
+      }
+    }
+    return undefined
   }
 
   private layoutSignature(): string {
@@ -407,12 +522,12 @@ export class ForceRenderer {
     const links = this.simLinks.map(
       (link) => `${this.itemOf(link.source)?.id}>${this.itemOf(link.target)?.id}`,
     )
-    return `${this.engine}|${nodes}|${links.join(',')}`
+    return `${this.engine}|${this.engine === 'schematic' ? this.basesVersion : 0}|${nodes}|${links.join(',')}`
   }
 
   /** Arrange the nodes of each layer by the engine and put the layouts of the layers in a grid */
   private async layoutByEngine(
-    layerLayout: LayerLayoutFn,
+    layerLayout: LayerArrangeFn,
     token: number,
     started: number,
     signature: string,
@@ -429,10 +544,7 @@ export class ForceRenderer {
           const [source, target] = [this.itemOf(link.source)?.id, this.itemOf(link.target)?.id]
           return source && target && ids.has(source) && ids.has(target) ? [{ source, target }] : []
         })
-        const positions = await layerLayout(
-          items.map((item) => ({ id: item.id, radius: item.radius })),
-          links,
-        )
+        const positions = await layerLayout(layer, items, links)
         return { layer, items, positions }
       }),
     )
@@ -461,6 +573,7 @@ export class ForceRenderer {
       }
     }
     this.appliedSignature = signature
+    this.routesAt = Number.NEGATIVE_INFINITY // (the nodes moved to the layout: the routes are made at once)
     this.placePorts()
     this.draw()
     if (!this.userMoved) this.fit()
@@ -568,7 +681,9 @@ export class ForceRenderer {
       const node = this.itemById.get(parentId)
       if (!node) continue
       const [cx, cy] = [node.x ?? 0, node.y ?? 0]
-      const desired = ports.map((port) => this.desiredAngle(node, port, center))
+      const desired = ports.map(
+        (port) => this.portHints.get(port.id) ?? this.desiredAngle(node, port, center),
+      )
       const angles = spreadAngles(desired, PORT_ARC / node.radius)
       ports.forEach((port, i) => {
         // a port moved by the user keeps its angle
@@ -775,14 +890,183 @@ export class ForceRenderer {
     if (!this.userMoved && this.ticks % FIT_INTERVAL_TICKS === 0) this.fit()
   }
 
-  /** Path of a link: a straight line */
+  /** Path of a link: a straight line, or a polyline with rounded corners around the nodes and the ports */
   private pathOf(link: DisplayLink): string {
     const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
-    return `M${from?.x ?? 0},${from?.y ?? 0} L${to?.x ?? 0},${to?.y ?? 0}`
+    const route = this.routes.get(link.id)
+    const [a, b] = [
+      { x: from?.x ?? 0, y: from?.y ?? 0 },
+      { x: to?.x ?? 0, y: to?.y ?? 0 },
+    ]
+    return route ? roundedPolyline([a, ...route, b], ROUTE_CORNER) : `M${a.x},${a.y} L${b.x},${b.y}`
+  }
+
+  /**
+   * (schematic layout) Make the routes of the links from the current positions of the nodes and the ports: a link
+   * which a straight line passes through a node or a port goes around them. They follow the nodes and the ports
+   * which are moved. Nothing is made again if nothing moved.
+   */
+  private updateRoutes(): void {
+    if (this.engine !== 'schematic') {
+      this.routes = new Map()
+      this.routesFor = ''
+      if (this.portHints.size > 0) {
+        this.portHints = new Map()
+        this.placePorts()
+      }
+      return
+    }
+    const items = [...this.bodies, ...this.ports]
+    const key = items
+      .map((i) => `${i.id}:${Math.round((i.x ?? 0) * 2)},${Math.round((i.y ?? 0) * 2)}`)
+      .join('|')
+    if (key === this.routesFor) return
+    // A heavy making (more than the budget) is not done on every frame: the old routes are drawn, and the routes are made
+    // a little later (the positions are drawn at once, so the links follow the nodes, the routes with some delay).
+    const now = performance.now()
+    if (this.routeCost > ROUTE_BUDGET_MS && now - this.routesAt < this.routeCost * 3) {
+      this.routeTimer ??= setTimeout(() => {
+        this.routeTimer = null
+        this.draw()
+      }, this.routeCost * 3)
+      return
+    }
+    this.routesFor = key
+    // (the ports of the links which go around something are put toward where the route leaves: this moves the ports)
+    if (this.updatePortHints()) {
+      this.routesFor = [...this.bodies, ...this.ports]
+        .map((i) => `${i.id}:${Math.round((i.x ?? 0) * 2)},${Math.round((i.y ?? 0) * 2)}`)
+        .join('|')
+    }
+
+    const make = (): Map<string, Position[]> => {
+      const obstacles: Obstacle[] = items.map((item) => ({
+        id: item.id,
+        x: item.x ?? 0,
+        y: item.y ?? 0,
+        radius: item.type === 'tp' ? PORT_RADIUS : item.radius,
+      }))
+      const endOf = (item: Item): RouteEnd | undefined => {
+        if (item.type !== 'tp') return { x: item.x ?? 0, y: item.y ?? 0, node: item.id, radius: item.radius }
+        const node = item.parent ? this.itemById.get(item.parent) : undefined
+        if (!node) return undefined
+        const angle = item.angle ?? 0
+        return {
+          x: item.x ?? 0,
+          y: item.y ?? 0,
+          node: node.id,
+          port: item.id,
+          radius: node.radius,
+          outward: { x: Math.cos(angle), y: Math.sin(angle) },
+        }
+      }
+      const requests: RouteRequest[] = []
+      for (const link of this.drawLinks) {
+        const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
+        const [a, b] = [from && endOf(from), to && endOf(to)]
+        if (a && b) requests.push({ id: link.id, from: a, to: b })
+      }
+      return routeAround(requests, obstacles)
+    }
+    let routes = make()
+    // A link which a straight line is clear for between the nodes must not go around because the ports were turned toward
+    // the routes of the other links (the ports of a small node are spread around it: they push each other): the ports of
+    // its nodes are not turned any more (they are toward the other node, as before).
+    for (let pass = 0; pass < 2; pass++) {
+      const nodes = new Set<string>()
+      for (const link of this.drawLinks) {
+        if (!routes.has(link.id) || !this.straightLinks.has(link.id)) continue
+        for (const end of [link.source, link.target]) {
+          const parent = this.itemById.get(end)?.parent
+          if (parent && this.ports.some((p) => p.parent === parent && this.portHints.has(p.id)))
+            nodes.add(parent)
+        }
+      }
+      if (nodes.size === 0) break
+      for (const node of nodes) this.hintsOff.add(node)
+      for (const port of this.ports) if (port.parent && nodes.has(port.parent)) this.portHints.delete(port.id)
+      this.placePorts()
+      routes = make()
+    }
+    this.routesFor = [...this.bodies, ...this.ports]
+      .map((i) => `${i.id}:${Math.round((i.x ?? 0) * 2)},${Math.round((i.y ?? 0) * 2)}`)
+      .join('|')
+    this.routes = routes
+    this.routeCost = performance.now() - now
+    this.routesAt = now
+  }
+
+  /**
+   * (schematic layout) The port of a link which goes around something is put toward where the link leaves the node, so
+   * the link does not leave the port toward the other side first. The route is made between the centers of the nodes (as
+   * if the links were between the nodes), and the direction of its first (and last) line is the direction of the port.
+   * The other ports are toward the node they are linked to, as before.
+   * @returns whether the angles of the ports are changed (the ports are moved then)
+   */
+  private updatePortHints(): boolean {
+    const nodeEnd = (item: Item): { end: RouteEnd; port?: string } | undefined => {
+      const node = item.type === 'tp' ? (item.parent ? this.itemById.get(item.parent) : undefined) : item
+      if (!node) return undefined
+      return {
+        end: { x: node.x ?? 0, y: node.y ?? 0, node: node.id, radius: node.radius },
+        ...(item.type === 'tp' ? { port: item.id } : {}),
+      }
+    }
+    const requests: Array<{ request: RouteRequest; fromPort?: string; toPort?: string }> = []
+    for (const link of this.drawLinks) {
+      const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
+      if (!from || !to || (from.type !== 'tp' && to.type !== 'tp')) continue // (no ports: nothing to turn)
+      const [a, b] = [nodeEnd(from), nodeEnd(to)]
+      if (!a || !b) continue
+      requests.push({
+        request: { id: link.id, from: a.end, to: b.end },
+        ...(a.port ? { fromPort: a.port } : {}),
+        ...(b.port ? { toPort: b.port } : {}),
+      })
+    }
+    const nodes: Obstacle[] = this.bodies.map((n) => ({
+      id: n.id,
+      x: n.x ?? 0,
+      y: n.y ?? 0,
+      radius: n.radius,
+    }))
+    const routes = routeAround(
+      requests.map((r) => r.request),
+      nodes,
+    )
+    /** The angle of the first line out of the first point of the points (the axis it goes along) */
+    const angleOf = (points: readonly Position[]): number | undefined => {
+      const [start, ...rest] = points
+      const next = rest.find((p) => p.x !== start?.x || p.y !== start?.y)
+      if (!start || !next) return undefined
+      const [dx, dy] = [next.x - start.x, next.y - start.y]
+      return Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 0 : Math.PI) : dy >= 0 ? Math.PI / 2 : -Math.PI / 2
+    }
+    const hints = new Map<string, number>()
+    const off = (port: string) => this.hintsOff.has(this.itemById.get(port)?.parent ?? '')
+    this.straightLinks = new Set()
+    for (const { request, fromPort, toPort } of requests) {
+      const route = routes.get(request.id)
+      if (!route) {
+        this.straightLinks.add(request.id)
+        continue
+      }
+      const [first, last] = [angleOf(route), angleOf([...route].reverse())]
+      if (fromPort && first !== undefined && !off(fromPort)) hints.set(fromPort, first)
+      if (toPort && last !== undefined && !off(toPort)) hints.set(toPort, last)
+    }
+    const same =
+      hints.size === this.portHints.size &&
+      [...hints].every(([id, angle]) => this.portHints.get(id) === angle)
+    if (same) return false
+    this.portHints = hints
+    this.placePorts()
+    return true
   }
 
   /** Draw the current positions */
   draw(): void {
+    this.updateRoutes()
     const at = (id: string) => this.itemById.get(id)
     this.linkLayer.selectAll<SVGPathElement, DisplayLink>('path').attr('d', (d) => this.pathOf(d))
     const nodes = this.nodeLayer.selectAll<SVGGElement, Item>('g.node')

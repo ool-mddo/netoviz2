@@ -1,0 +1,19 @@
+# mddo-fw (original_asis) の図の定義。トポロジとは別に人が管理する。
+# テスト用のコピー (正本は playground の profiles/mddo-fw/asis.yaml の 1 つ目の文書。target.snapshot は除いてある)。
+view: physical
+target: { network: mddo-fw, layer: layer1 }
+tiers: [wan, fw, core, segment, host] # 上 = 上流
+
+# 名前の分解。site-a-br-1 → site=a, role=br, index=1 / site-a-seg1 → site=a, role=seg, index=1
+name: '^site-(?<site>[a-z])-(?<role>[a-z]+)-?(?<index>\d+)$'
+
+rules: # 後に書いたものが勝つ
+  - { select: '*', group: site, pair: { by: index, primary: '1' } }
+  - { select: '[role=br]', tier: wan }
+  - { select: '[role=fw]', tier: fw }
+  - { select: '[role=cr]', tier: core }
+  - { select: '[role=seg]', tier: segment }
+  - { select: '[role=host]', tier: host }
+  - { select: '[site=a]', order: 1 } # 拠点は左から a, b, c
+  - { select: '[site=b]', order: 2 }
+  - { select: '[site=c]', order: 3 }

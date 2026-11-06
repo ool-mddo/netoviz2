@@ -1,6 +1,6 @@
 {
   "name": "netoviz2",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Multi-layer network topology viewer for ool-mddo (frontend only; data comes from netomox-exp)",
   "license": "MIT",
@@ -24,7 +24,8 @@
     "d3-zoom": "^3.0.0",
     "pinia": "^4.1.0",
     "vue": "^3.5.44",
-    "vue-router": "^5.4.0"
+    "vue-router": "^5.4.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/d3-drag": "^3.0.7",

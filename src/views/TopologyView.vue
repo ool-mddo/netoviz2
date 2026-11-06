@@ -88,6 +88,8 @@ usePolling(reload, RELOAD_INTERVAL_MS)
  * The dependency view (the supports of the selected object) is the secondary view: `?dependency=1` shows it.
  */
 const engine = computed<LayoutEngine>(() => parseLayoutEngine(route.query.layout) ?? DEFAULT_LAYOUT_ENGINE)
+/** Diagram profile of the schematic layout (`?profile=<name>`) */
+const profile = computed(() => (typeof route.query.profile === 'string' ? route.query.profile : undefined))
 const dependencyOn = computed(() => route.query.dependency === '1')
 
 function setEngine(next: LayoutEngine): void {
@@ -143,7 +145,12 @@ onBeforeUnmount(() => selection.select(null))
           @update:dependency="setDependency"
         />
         <div class="panels" :class="{ dependency: dependencyOn }">
-          <ForceView :visible-layers="visibleLayers" :engine="engine" @update:engine="setEngine" />
+          <ForceView
+            :visible-layers="visibleLayers"
+            :engine="engine"
+            :profile="profile"
+            @update:engine="setEngine"
+          />
           <DependencyView v-if="dependencyOn" :visible-layers="visibleLayers" />
         </div>
       </section>
