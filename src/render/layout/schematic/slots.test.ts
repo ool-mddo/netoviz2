@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseProfiles } from './profile'
+import { parseProfiles } from '../../../test/profileYaml'
 import { assignSlots } from './slots'
 import { NO_PAIR_PROFILE, linkOf, namesOf, node, slotsOf } from './testing'
 

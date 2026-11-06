@@ -1,5 +1,5 @@
 # mddo-fw (original_asis) の図の定義。トポロジとは別に人が管理する。
-# 正本。repos/netoviz2/src/profiles/mddo-fw.yaml は試行段階の作業用コピー (?profile=mddo-fw)。
+# テスト用のコピー (正本は playground の profiles/mddo-fw/asis.yaml の 1 つ目の文書。target.snapshot は除いてある)。
 view: physical
 target: { network: mddo-fw, layer: layer1 }
 tiers: [wan, fw, core, segment, host] # 上 = 上流

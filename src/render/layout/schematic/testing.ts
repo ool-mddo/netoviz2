@@ -2,7 +2,7 @@ import { SupportIndex } from '../../../domain/supportIndex'
 import { mddoFwLayer, mddoFwSupports } from '../../../test/mddoFwStack'
 import { annotate } from './annotate'
 import { lowerClosure, lowerLayersOf, lowerNodesIn } from './inherit'
-import { parseProfiles } from './profile'
+import { parseProfiles } from '../../../test/profileYaml'
 import { assignSlots, type SlotLayout } from './slots'
 import type { DiagramProfile, SchematicBase, SchematicNode } from './types'
 

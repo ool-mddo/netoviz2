@@ -27,6 +27,36 @@ describe('SchematicReportPanel', () => {
     ])
   })
 
+  it('tells which profile each layer is arranged by (and the profile of the lower layer which is inherited)', () => {
+    const inherited: SchematicReport = {
+      layer: 'layer3',
+      source: 'inherited',
+      violations: [],
+      base: 'layer1',
+    }
+    const inheritedNoProfile: SchematicReport = { ...inherited, layer: 'layer4', base: 'layer2' }
+    const wrapper = mount(SchematicReportPanel, {
+      props: {
+        reports: [given, inherited, inheritedNoProfile],
+        profiles: { layer2: 'asis #2 (by target)', layer1: 'asis #1 (named)' },
+      },
+    })
+    expect(wrapper.findAll('[data-testid=report-source]').map((e) => e.text())).toEqual([
+      'profile asis #2 (by target)',
+      'inherited from layer1 (profile asis #1 (named))',
+      'inherited from layer2 (profile asis #2 (by target))', // layer2 has a profile (the base of layer4)
+    ])
+    const plain = mount(SchematicReportPanel, { props: { reports: [inherited], profiles: {} } })
+    expect(plain.get('[data-testid=report-source]').text()).toBe('inherited from layer1')
+  })
+
+  it('shows the note (e.g. no profile applies) only when it is given', () => {
+    const without = mount(SchematicReportPanel, { props: { reports: [none] } })
+    expect(without.find('[data-testid=report-note]').exists()).toBe(false)
+    const withNote = mount(SchematicReportPanel, { props: { reports: [none], note: 'no profile applies' } })
+    expect(withNote.get('[data-testid=report-note]').text()).toBe('no profile applies')
+  })
+
   it('shows the number of exceptions, with the list of them, or that there is none', () => {
     const wrapper = mount(SchematicReportPanel, { props: { reports: [inferred, given] } })
     expect(wrapper.get('[data-testid=report-violations]').text()).toBe('2 exceptions')

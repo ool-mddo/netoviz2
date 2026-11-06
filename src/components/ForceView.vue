@@ -4,7 +4,14 @@ import { useSelect } from '../composables/useSelect'
 import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
-import { loadProfiles, type ProfileSource } from '../render/layout/schematic/profileSource'
+import { getProfiles } from '../api/client'
+import { selectProfile } from '../render/layout/schematic/profile'
+import {
+  loadProfiles,
+  type LoadedProfile,
+  type LoadedProfiles,
+  type ProfileSource,
+} from '../render/layout/schematic/profileSource'
 import type { SchematicBase, SchematicReport } from '../render/layout/schematic/types'
 import { lowerLayerIdsOf, schematicBasesOf } from '../domain/schematicBases'
 import SchematicReportPanel from './SchematicReportPanel.vue'
@@ -23,7 +30,7 @@ const props = defineProps<{
   engine: LayoutEngine
   /** Name of the diagram profile for the schematic layout */
   profile?: string
-  /** Source of the profiles (default: the profiles bundled in the app) */
+  /** Source of the profiles (default: the API of the backend) */
   profileSource?: ProfileSource
 }>()
 const emit = defineEmits<{ 'update:engine': [engine: LayoutEngine] }>()
@@ -39,8 +46,10 @@ const arranging = ref(false)
 const reports = ref<SchematicReport[]>([])
 /** Problem of loading the profile (the schematic layout is made without a profile then) */
 const profileError = ref('')
-/** The profile of the URL is loaded (or failed): the schematic layout waits for it, not to arrange twice */
-const profileSettled = ref(!props.profile)
+/** The profiles are loaded (or failed): the schematic layout waits for them, not to arrange twice */
+const profileSettled = ref(!(props.engine === 'schematic' || props.profile))
+/** The profiles in use: where they are from, and whether the file was named (`?profile=`) or selected by the target */
+const profileInfo = ref<{ how: 'explicit' | 'auto'; entries: LoadedProfile[] } | null>(null)
 /** The lower layers which the schematic layout inherits from are loaded (the layout waits for them, too) */
 const basesReady = ref(props.engine !== 'schematic')
 let bases: ReadonlyMap<string, readonly SchematicBase[]> = new Map()
@@ -112,7 +121,7 @@ onMounted(() => {
   )
   if (loaded.value) showGraph()
   else renderer.setHighlight(highlight.value)
-  if (props.profile) void applyProfile(props.profile)
+  if (props.profile || props.engine === 'schematic') void applyProfile()
 })
 onBeforeUnmount(() => {
   profileToken++
@@ -122,30 +131,77 @@ onBeforeUnmount(() => {
 
 /** To ignore the result of an old (asynchronous) loading of a profile */
 let profileToken = 0
-async function applyProfile(name: string | undefined): Promise<void> {
+/**
+ * Loaded profiles by the name of the file ('' for all): a loading is not repeated (and the same profiles are not
+ * given to the renderer again, which would arrange again) when the engine is changed back and forth. The view is
+ * made again for another network / snapshot, so they are for this one.
+ */
+const loadedProfiles = new Map<string, LoadedProfiles>()
+/**
+ * Load the profiles of the network for the schematic layout: only the file of the name (`?profile=`) or, without a
+ * name, all the files (the profile of a layer is selected by its target). They are not loaded for the other engines
+ * unless a name is given.
+ */
+async function applyProfile(): Promise<void> {
   const token = ++profileToken
+  const name = props.profile || undefined
   profileError.value = ''
-  profileSettled.value = !name
-  if (!name) {
-    renderer?.setProfiles([])
+  const wanted = props.engine === 'schematic' || name !== undefined
+  profileSettled.value = !wanted
+  if (!wanted) {
+    // (the profiles in the renderer are not used by the other engines: not changed, not to arrange for nothing)
+    profileInfo.value = null
     return
   }
+  const label = name === undefined ? 'profiles' : `profile '${name}'`
+  const how = name === undefined ? 'auto' : 'explicit'
   try {
-    const { profiles, warnings } = await loadProfiles(name, props.profileSource)
-    if (token !== profileToken) return
-    if (warnings.length > 0) profileError.value = `profile '${name}': ${warnings.join('; ')}`
-    renderer?.setProfiles(profiles)
+    let loaded = loadedProfiles.get(name ?? '')
+    if (!loaded) {
+      loaded = await loadProfiles(topology.network, props.profileSource ?? getProfiles, {
+        ...(name === undefined ? {} : { name }),
+        ...(topology.snapshot ? { snapshot: topology.snapshot } : {}),
+      })
+      if (token !== profileToken) return
+      loadedProfiles.set(name ?? '', loaded)
+    }
+    if (loaded.warnings.length > 0) profileError.value = `${label}: ${loaded.warnings.join('; ')}`
+    profileInfo.value = { how, entries: loaded.entries }
+    renderer?.setProfiles(loaded.profiles)
   } catch (error) {
     if (token !== profileToken) return
-    profileError.value = `profile '${name}': ${error instanceof Error ? error.message : String(error)}`
+    profileError.value = `${label}: ${error instanceof Error ? error.message : String(error)}`
+    profileInfo.value = null
     renderer?.setProfiles([])
   }
   profileSettled.value = true
+  arrangeWhenReady()
 }
-watch(
-  () => props.profile,
-  (name) => void applyProfile(name),
+watch([() => props.profile, () => props.engine === 'schematic'], () => void applyProfile())
+
+/** Told in the report when no profile applies to the network / snapshot (the layers are arranged without profiles) */
+const profileNote = computed(() =>
+  profileInfo.value && profileInfo.value.entries.length === 0
+    ? 'no profile applies to this network / snapshot'
+    : '',
 )
+
+/** Which profile (file, document) each layer is arranged by, for the report: the target selects it as the renderer does */
+const profileLabels = computed(() => {
+  const info = profileInfo.value
+  const labels: Record<string, string> = {}
+  if (!info) return labels
+  for (const layer of layerOrder.value) {
+    const profile = selectProfile(
+      info.entries.map((entry) => entry.profile),
+      layer,
+    )
+    const entry = info.entries.find((e) => e.profile === profile)
+    if (entry)
+      labels[layer] = `${entry.file} #${entry.index} (${info.how === 'auto' ? 'by target' : 'named'})`
+  }
+  return labels
+})
 
 /** All the visible layers are loaded (the layout is made after that, not for each layer) */
 let graphShown = false
@@ -200,13 +256,17 @@ async function prepareBases(): Promise<void> {
   }
   if (token !== basesToken) return
   basesReady.value = true
-  if (pendingEngine) {
-    // the engine was changed to schematic while the lower layers were loaded: arrange once, with them
-    pendingEngine = false
-    renderer?.setEngine('schematic')
-  } else if (loaded.value) {
-    showGraph()
-  }
+  if (pendingEngine) arrangeWhenReady()
+  else if (loaded.value) showGraph()
+}
+/**
+ * The engine was changed to schematic: arrange once, after both the lower layers and the profiles are loaded
+ * (called when either of them is done)
+ */
+function arrangeWhenReady(): void {
+  if (!pendingEngine || !basesReady.value || !profileSettled.value) return
+  pendingEngine = false
+  renderer?.setEngine('schematic')
 }
 watch([() => props.engine, () => props.visibleLayers.join(','), visibleLoaded], () => void prepareBases(), {
   immediate: true,
@@ -226,7 +286,7 @@ watch(
   () => props.engine,
   (engine) => {
     // (prepareBases is called before this: basesReady is false while the lower layers are loaded)
-    pendingEngine = engine === 'schematic' && !basesReady.value
+    pendingEngine = engine === 'schematic' && !(basesReady.value && profileSettled.value)
     if (!pendingEngine) renderer?.setEngine(engine)
   },
 )
@@ -258,7 +318,12 @@ function onEngineChange(event: Event): void {
       }}</span>
       <span v-if="profileError" class="error" data-testid="profile-error">{{ profileError }}</span>
     </div>
-    <SchematicReportPanel v-if="engine === 'schematic' && reports.length > 0" :reports="reports" />
+    <SchematicReportPanel
+      v-if="engine === 'schematic' && reports.length > 0"
+      :reports="reports"
+      :profiles="profileLabels"
+      :note="profileNote"
+    />
     <svg ref="svgEl" class="force-svg" data-testid="force-svg" />
   </div>
 </template>

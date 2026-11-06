@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ProfileError, parseProfiles, parseSelector, selectProfile } from './profile'
+import { ProfileError, parseSelector, selectProfile } from './profile'
+import { parseProfiles } from '../../../test/profileYaml'
 
 const SAMPLE = `
 view: physical

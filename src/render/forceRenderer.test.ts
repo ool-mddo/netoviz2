@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { DisplayGraph } from '../domain/graph'
 import { ForceRenderer, type Highlight } from './forceRenderer'
-import { parseProfiles } from './layout/schematic/profile'
+import { parseProfiles } from '../test/profileYaml'
 import type { SchematicLayerFn } from './layout/schematic/types'
 import type { LayerLayoutFn, LayoutStats, Positions } from './layout/types'
 

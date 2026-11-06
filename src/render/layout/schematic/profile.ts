@@ -1,4 +1,3 @@
-import { parseAllDocuments } from 'yaml'
 import type { DiagramProfile, ProfileRule, Selector } from './types'
 
 export interface ParsedProfiles {
@@ -12,7 +11,7 @@ export class ProfileError extends Error {}
 // Unknown keys (e.g. the keys of the design which are not supported yet) are ignored with a warning: a typo in
 // `target` would widen the layers the profile is applied to, so it is checked as well.
 const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'name', 'inherit', 'rules'])
-const KNOWN_TARGET_KEYS = new Set(['network', 'layer'])
+const KNOWN_TARGET_KEYS = new Set(['network', 'snapshot', 'layer'])
 const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'pair'])
 const KNOWN_PAIR_KEYS = new Set(['by', 'primary'])
 const KNOWN_INHERIT_KEYS = new Set(['from', 'via'])
@@ -65,7 +64,7 @@ function asString(value: unknown, where: string): string {
   return String(value)
 }
 
-/** A string which must be quoted in YAML (e.g. `'01'`: an unquoted 01 is read as the number 1 and does not match) */
+/** A string which must be quoted in the YAML file (e.g. `'01'`: an unquoted 01 is read as the number 1 and does not match) */
 function asQuotedString(value: unknown, where: string): string {
   if (typeof value !== 'string') throw new ProfileError(`${where} must be a quoted string (e.g. '1')`)
   return value
@@ -99,7 +98,11 @@ function parseRule(value: unknown, index: number, tiers: readonly string[], warn
   return rule
 }
 
-function parseProfile(value: unknown, warnings: string[]): DiagramProfile {
+/**
+ * Parse a profile: a JSON value (a document of the profile file, converted from YAML by the backend).
+ * @throws ProfileError if it is not valid
+ */
+export function parseProfile(value: unknown, warnings: string[]): DiagramProfile {
   const raw = asRecord(value, 'profile')
   warnUnknownKeys(raw, KNOWN_TOP_KEYS, '', warnings)
   const view = asString(raw.view, 'view')
@@ -107,6 +110,14 @@ function parseProfile(value: unknown, warnings: string[]): DiagramProfile {
   warnUnknownKeys(targetRaw, KNOWN_TARGET_KEYS, 'target: ', warnings)
   const target: DiagramProfile['target'] = {}
   if (targetRaw.network !== undefined) target.network = asString(targetRaw.network, 'target.network')
+  if (targetRaw.snapshot !== undefined) {
+    const pattern = asString(targetRaw.snapshot, 'target.snapshot')
+    try {
+      target.snapshot = new RegExp(`^(?:${pattern})$`) // the whole name
+    } catch {
+      throw new ProfileError(`target.snapshot is not a valid regular expression: ${pattern}`)
+    }
+  }
   if (targetRaw.layer !== undefined) target.layer = asString(targetRaw.layer, 'target.layer')
   let inherit: DiagramProfile['inherit']
   if (raw.inherit !== undefined) {
@@ -138,28 +149,38 @@ function parseProfile(value: unknown, warnings: string[]): DiagramProfile {
 }
 
 /**
- * Parse a profile file: one or more YAML documents (`---` separated), each of them is a view.
- * TODO: the regular expression of `name` is run on the main thread for every node. It is acceptable for the bundled
- * profiles, but limit the length of the pattern (and of the names) or use a worker when profiles come from the backend.
+ * Parse the documents of a profile file (each of them is a view): the values which the backend gives (`documents`).
+ * TODO: the regular expression of `name` is run on the main thread for every node. It is acceptable for the profiles
+ * managed in git, but limit the length of the pattern (and of the names) or use a worker for profiles from elsewhere.
  */
-export function parseProfiles(text: string): ParsedProfiles {
+export function parseProfileDocuments(documents: readonly unknown[]): ParsedProfiles {
   const warnings: string[] = []
   const profiles: DiagramProfile[] = []
-  for (const doc of parseAllDocuments(text)) {
-    const [error] = doc.errors
-    if (error) throw new ProfileError(error.message)
-    for (const warning of doc.warnings) warnings.push(warning.message)
-    const value: unknown = doc.toJS()
+  for (const value of documents) {
     if (value === null || value === undefined) continue // an empty document
     profiles.push(parseProfile(value, warnings))
   }
   return { profiles, warnings }
 }
 
+/** Where the profiles are used: the network and the snapshot being shown (the snapshot may be unknown) */
+export interface ProfileScope {
+  network: string
+  snapshot?: string
+}
+
+/** Whether the target of the profile accepts the network / snapshot (an omitted item accepts anything) */
+export function profileInScope(profile: DiagramProfile, scope: ProfileScope): boolean {
+  const { network, snapshot } = profile.target
+  if (network !== undefined && network !== scope.network) return false
+  if (snapshot !== undefined && scope.snapshot !== undefined && !snapshot.test(scope.snapshot)) return false
+  return true
+}
+
 /**
  * Profile to use for a layer: the first profile of the view (the first one if no view is given) whose target
  * accepts the layer. A target without a layer accepts all layers.
- * (`target.network` is not checked here: the profile is loaded for the network being shown.)
+ * (`target.network` and `target.snapshot` are not checked here: see `profileInScope`.)
  */
 export function selectProfile(
   profiles: readonly DiagramProfile[],

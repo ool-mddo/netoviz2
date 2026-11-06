@@ -8,7 +8,7 @@ import {
 } from '../../../test/sampleLayers'
 import { annotate } from './annotate'
 import { inferProfile } from './infer'
-import { parseProfiles } from './profile'
+import { parseProfiles } from '../../../test/profileYaml'
 
 const inferOf = (layer: ReturnType<typeof mddoFwLayer1>) => inferProfile(layer.nodes, layer.links)
 

@@ -1,4 +1,12 @@
-import type { AttributesData, IndexEntry, LayerData, Summary, SupportsData } from './types'
+import type {
+  AttributesData,
+  IndexEntry,
+  LayerData,
+  ProfileFile,
+  ProfilesData,
+  Summary,
+  SupportsData,
+} from './types'
 
 /** Max number of ids in one request of attributes (server limit) */
 export const MAX_ATTRIBUTE_IDS = 200
@@ -32,6 +40,27 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
   if (!response.ok) throw await errorOf(response)
   return (await response.json()) as T
+}
+
+/**
+ * Diagram profile files of the network (not under a snapshot: the profiles tell the snapshots they apply to).
+ * @throws ApiError 404 if the backend does not have the API (an old version); 502 if the response is not in the form
+ */
+export async function getProfiles(network: string): Promise<ProfileFile[]> {
+  let data: ProfilesData
+  try {
+    data = await requestJson<ProfilesData>(`/topologies/${encodeURIComponent(network)}/netoviz2/profiles`)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ApiError(404, 'the backend does not provide the profile API (netomox-exp is old?)')
+    }
+    throw error
+  }
+  const valid = (file: ProfileFile | null) => typeof file?.name === 'string' && Array.isArray(file.documents)
+  if (!Array.isArray(data?.profiles) || !data.profiles.every(valid)) {
+    throw new ApiError(502, 'unexpected response of the profile API')
+  }
+  return data.profiles
 }
 
 /** List of network/snapshot (existing API of netomox-exp) */

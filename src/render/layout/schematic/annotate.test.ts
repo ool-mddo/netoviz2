@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { mddoFwLayer1 } from '../../../test/mddoFwLayer1'
 import { annotate } from './annotate'
-import { parseProfiles } from './profile'
-import { loadProfiles } from './profileSource'
+import { parseProfiles } from '../../../test/profileYaml'
+import { mddoFwProfiles } from '../../../test/mddoFwProfile'
 
 const { nodes } = mddoFwLayer1()
 
 async function mddoFwProfile() {
-  const { profiles, warnings } = await loadProfiles('mddo-fw')
+  const { profiles, warnings } = await mddoFwProfiles()
   expect(warnings).toEqual([])
   return profiles[0]!
 }

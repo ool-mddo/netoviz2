@@ -51,16 +51,98 @@ interface Arranged {
   draft?: string
 }
 
-/** Arrange by a profile; undefined if the profile gives no tier to any node (it does not fit) */
+/** Radius of the node of the ID (0 for an unknown one) */
+const radiusOf = (nodes: readonly SchematicNode[]) => {
+  const radius = new Map(nodes.map((node) => [node.id, node.radius]))
+  return (id: string) => radius.get(id) ?? 0
+}
+
+/**
+ * The nodes which the profile gives no tier to but which are linked to two or more of the nodes it classifies (e.g. the
+ * segments between the devices): they join the devices, so they are connection points, put between the devices after
+ * the devices are arranged (as when the arrangement is inherited), not arranged in a row of their own.
+ */
+function connectionPointsOf(
+  unclassified: readonly string[],
+  links: readonly Link[],
+  classified: ReadonlySet<string>,
+): Set<string> {
+  const neighbors = new Map<string, Set<string>>(unclassified.map((id) => [id, new Set()]))
+  for (const { source, target } of links) {
+    if (classified.has(target)) neighbors.get(source)?.add(target)
+    if (classified.has(source)) neighbors.get(target)?.add(source)
+  }
+  return new Set(unclassified.filter((id) => (neighbors.get(id)?.size ?? 0) >= 2))
+}
+
+/**
+ * Put the connection points between the devices (the devices are not moved). The connection points which are not
+ * linked to any device are in a row under the diagram, centered.
+ */
+function addConnectionPoints(
+  placed: Positions,
+  connectors: readonly SchematicNode[],
+  links: readonly Link[],
+  radiusOf: (id: string) => number,
+): Positions {
+  const between = placeConnectors(
+    connectors.map((node) => ({ id: node.id, radius: node.radius })),
+    links,
+    placed,
+    radiusOf,
+  )
+  const positions: Positions = new Map([...placed, ...between])
+  const alone = connectors.filter((node) => !between.has(node.id))
+  if (alone.length > 0) {
+    const bottom = [...positions.entries()].reduce((max, [id, p]) => Math.max(max, p.y + radiusOf(id)), 0)
+    const width = alone.reduce((sum, node) => sum + 2 * node.radius + 20, -20)
+    const xs = [...positions.values()].map((p) => p.x)
+    let x = (xs.length > 0 ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0) - width / 2
+    for (const node of alone) {
+      positions.set(node.id, { x: x + node.radius, y: bottom + 90 })
+      x += 2 * node.radius + 20
+    }
+  }
+  return positions
+}
+
+/**
+ * Arrange by a profile; undefined if the profile gives no tier to any node (it does not fit).
+ * @param withConnectionPoints the nodes without a tier which join two or more classified nodes are connection points
+ *   (see connectionPointsOf): only when the arrangement cannot be inherited from a lower layer. Otherwise they are
+ *   exceptions: a node which a profile or an inference missed is not hidden by it.
+ */
 function arrangeByProfile(
   nodes: readonly SchematicNode[],
   links: readonly Link[],
   profile: DiagramProfile,
+  withConnectionPoints = false,
 ): Pick<Arranged, 'positions' | 'annotated'> | undefined {
   const annotated = annotate(nodes, profile)
   if (annotated.unclassified.length >= nodes.length) return undefined
-  const slots = assignSlots(nodes, annotated, links, { unclassifiedRow: profile.tiers.length })
-  return { annotated, positions: solvePositions(nodes, slots, links) }
+  const unclassified = new Set(annotated.unclassified)
+  const classified = new Set(nodes.filter((node) => !unclassified.has(node.id)).map((node) => node.id))
+  const connectorIds = withConnectionPoints
+    ? connectionPointsOf(annotated.unclassified, links, classified)
+    : new Set<string>()
+  const devices = nodes.filter((node) => !connectorIds.has(node.id))
+  const deviceLinks = links.filter((l) => !connectorIds.has(l.source) && !connectorIds.has(l.target))
+  const slots = assignSlots(devices, annotated, deviceLinks, { unclassifiedRow: profile.tiers.length })
+  const placed = solvePositions(devices, slots, deviceLinks)
+  const positions =
+    connectorIds.size === 0
+      ? placed
+      : addConnectionPoints(
+          placed,
+          nodes.filter((node) => connectorIds.has(node.id)),
+          links,
+          radiusOf(nodes),
+        )
+  // the connection points are not exceptions: only the other nodes without a tier are told
+  return {
+    annotated: { ...annotated, unclassified: annotated.unclassified.filter((id) => !connectorIds.has(id)) },
+    positions,
+  }
 }
 
 type BaseArrangement = Pick<Arranged, 'positions' | 'annotated'> | undefined
@@ -117,29 +199,7 @@ function arrangeByInheritance(
     nodeGap: DEVICE_GAP,
     pairGap: DEVICE_GAP,
   })
-  const radius = new Map(nodes.map((node) => [node.id, node.radius]))
-  const between = placeConnectors(
-    connectors.map((node) => ({ id: node.id, radius: node.radius })),
-    links,
-    placed,
-    (id) => radius.get(id) ?? 0,
-  )
-  // the connection points which are not linked to any device are in a row under the diagram, centered
-  const positions: Positions = new Map([...placed, ...between])
-  const alone = connectors.filter((node) => !between.has(node.id))
-  if (alone.length > 0) {
-    const bottom = [...positions.entries()].reduce(
-      (max, [id, p]) => Math.max(max, p.y + (radius.get(id) ?? 0)),
-      0,
-    )
-    const width = alone.reduce((sum, node) => sum + 2 * node.radius + 20, -20)
-    const xs = [...positions.values()].map((p) => p.x)
-    let x = (xs.length > 0 ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0) - width / 2
-    for (const node of alone) {
-      positions.set(node.id, { x: x + node.radius, y: bottom + 90 })
-      x += 2 * node.radius + 20
-    }
-  }
+  const positions = addConnectionPoints(placed, connectors, links, radiusOf(nodes))
   return { positions, annotated, source: 'inherited', base: base.layer }
 }
 
@@ -161,7 +221,7 @@ export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> 
 
   if (profile && inheritFrom === undefined) {
     attempts.push(() => {
-      const arranged = arrangeByProfile(nodes, links, profile)
+      const arranged = arrangeByProfile(nodes, links, profile, bases.length === 0)
       return arranged && { ...arranged, source: 'profile' }
     })
   }
@@ -173,7 +233,7 @@ export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> 
   for (const base of orderedBases) attempts.push(() => arrangeByInheritance(nodes, links, base))
   if (profile && inheritFrom !== undefined) {
     attempts.push(() => {
-      const arranged = arrangeByProfile(nodes, links, profile)
+      const arranged = arrangeByProfile(nodes, links, profile, bases.length === 0)
       return arranged && { ...arranged, source: 'profile' }
     })
   }

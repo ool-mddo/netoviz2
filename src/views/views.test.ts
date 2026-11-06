@@ -30,6 +30,7 @@ beforeEach(() => {
   mocked.getLayer.mockImplementation((_nw, _ss, id) =>
     Promise.resolve(id === 'layer1' ? layer1Data : layer2Data),
   )
+  mocked.getProfiles.mockResolvedValue([]) // no profile files (the default source of the schematic layout)
 })
 
 const indexEntries = [
@@ -222,9 +223,11 @@ describe('TopologyView', () => {
     })
 
     it('passes the profile in the URL query (?profile=) to the view: a profile which is not found is told', async () => {
+      mocked.getSupports.mockResolvedValue(supportsData) // the schematic layout loads the supports
       const wrapper = await mountView('/nw/ss?layout=schematic&profile=nothing')
-      await flushPromises()
-      expect(wrapper.get('[data-testid=profile-error]').text()).toContain("profile 'nothing' is not found")
+      await vi.waitFor(() =>
+        expect(wrapper.get('[data-testid=profile-error]').text()).toContain("profile 'nothing' is not found"),
+      )
     })
 
     it('ignores an unknown engine in the URL query (e.g. an engine which was removed)', async () => {

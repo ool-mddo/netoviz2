@@ -2,19 +2,33 @@
 import { ref } from 'vue'
 import type { SchematicReport } from '../render/layout/schematic/types'
 
-defineProps<{ reports: SchematicReport[] }>()
+const props = defineProps<{
+  reports: SchematicReport[]
+  /** Profile in use for each layer (file, position of the document, how it was selected) */
+  profiles?: Record<string, string>
+  /** Told when no profile applies */
+  note?: string
+}>()
 
 function sourceLabel(report: SchematicReport): string {
   switch (report.source) {
-    case 'profile':
-      return 'profile'
+    case 'profile': {
+      const used = props.profiles?.[report.layer]
+      return used === undefined ? 'profile' : `profile ${used}`
+    }
     case 'inferred':
       return 'inferred (no usable profile)'
     case 'inherited':
-      return `inherited from ${report.base ?? 'the lower layer'}`
+      return `inherited from ${report.base ?? 'the lower layer'}${inheritedProfile(report)}`
     case 'none':
       return 'no profile (stress layout)'
   }
+}
+
+/** The profile of the lower layer which the arrangement is inherited from (if it has one) */
+function inheritedProfile(report: SchematicReport): string {
+  const used = report.base === undefined ? undefined : props.profiles?.[report.base]
+  return used === undefined ? '' : ` (profile ${used})`
 }
 
 /** Layer whose draft was copied (to tell it) */
@@ -38,6 +52,7 @@ async function copy(report: SchematicReport): Promise<void> {
 
 <template>
   <div class="schematic-report" data-testid="schematic-report">
+    <div v-if="note" class="note" data-testid="report-note">{{ note }}</div>
     <div v-for="report in reports" :key="report.layer" class="report" :data-layer="report.layer">
       <span class="layer">{{ report.layer }}</span>
       <span class="source" data-testid="report-source">{{ sourceLabel(report) }}</span>

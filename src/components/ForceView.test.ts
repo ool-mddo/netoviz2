@@ -6,7 +6,10 @@ import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 import { useViewStore } from '../stores/view'
 import { attributesData, layer1Data, layer2Data, makeSummary, supportsData } from '../test/fixtures'
-import { profileSourceOf } from '../render/layout/schematic/profileSource'
+import type { ProfileFile } from '../api/types'
+import type { ProfileSource } from '../render/layout/schematic/profileSource'
+import { profileSourceOf } from '../test/profileSource'
+import { yamlDocuments } from '../test/profileYaml'
 import { layoutSchematic } from '../render/layout/schematic'
 import ForceView from './ForceView.vue'
 
@@ -50,6 +53,7 @@ beforeEach(() => {
   )
   mocked.getSupports.mockResolvedValue(supportsData)
   mocked.getAttributes.mockResolvedValue(attributesData)
+  mocked.getProfiles.mockResolvedValue([]) // no profile files (the default source of the schematic layout)
 })
 afterEach(() => {
   current?.unmount()
@@ -237,7 +241,9 @@ describe('ForceView', () => {
       await flushPromises()
       expect(layoutSchematic).toHaveBeenCalledTimes(1)
       expect(vi.mocked(layoutSchematic).mock.calls[0]?.[0].bases?.map((b) => b.layer)).toEqual(['layer1'])
-      expect(wrapper.get('[data-testid=report-source]').text()).toBe('inherited from layer1')
+      expect(wrapper.get('[data-testid=report-source]').text()).toBe(
+        'inherited from layer1 (profile base #1 (named))',
+      )
     })
 
     it('arranges once with the lower layer when the view is opened with the schematic engine', async () => {
@@ -251,7 +257,9 @@ describe('ForceView', () => {
       await vi.waitFor(() => expect(wrapper.find('[data-testid=report-source]').exists()).toBe(true))
       await flushPromises()
       expect(layoutSchematic).toHaveBeenCalledTimes(1)
-      expect(wrapper.get('[data-testid=report-source]').text()).toBe('inherited from layer1')
+      expect(wrapper.get('[data-testid=report-source]').text()).toBe(
+        'inherited from layer1 (profile base #1 (named))',
+      )
     })
 
     it('arranges even if the lower layer cannot be loaded (without it)', async () => {
@@ -332,12 +340,16 @@ describe('ForceView', () => {
       expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
     })
 
-    /** Source whose loading is finished by the test */
+    /** Source whose loading is finished by the test: the calls are numbered in the order (0, 1, ...) */
     const deferredSource = () => {
-      const resolvers = new Map<string, (text: string | undefined) => void>()
-      const source = (name: string) =>
-        new Promise<string | undefined>((resolve) => resolvers.set(name, resolve))
-      return { source, resolve: (name: string, text?: string) => resolvers.get(name)?.(text) }
+      const resolvers: Array<(files: ProfileFile[]) => void> = []
+      const source: ProfileSource = () => new Promise<ProfileFile[]>((resolve) => resolvers.push(resolve))
+      return {
+        source,
+        /** Finish the call with a file of the name (YAML text); no file if the text is undefined */
+        resolve: (call: number, name: string, text?: string) =>
+          resolvers[call]?.(text === undefined ? [] : [{ name, documents: yamlDocuments(text).documents }]),
+      }
     }
 
     it('waits for the profile to arrange the nodes (the schematic layout is made once, with the profile)', async () => {
@@ -349,7 +361,7 @@ describe('ForceView', () => {
       })
       current = wrapper
       expect(count(wrapper, 'g.node:not(.tp)')).toBe(0)
-      resolve('ok', 'view: v\n')
+      resolve(0, 'ok', 'view: v\n')
       await flushPromises()
       await vi.waitFor(() => expect(count(wrapper, 'g.node:not(.tp)')).toBe(3))
     })
@@ -362,7 +374,7 @@ describe('ForceView', () => {
         profileSource: source,
       })
       current = wrapper
-      resolve('nothing', undefined)
+      resolve(0, 'nothing')
       await flushPromises()
       await vi.waitFor(() => expect(count(wrapper, 'g.node:not(.tp)')).toBe(3))
     })
@@ -376,9 +388,9 @@ describe('ForceView', () => {
       })
       current = wrapper
       await wrapper.setProps({ profile: 'b' })
-      resolve('b', 'view: b\n')
+      resolve(1, 'b', 'view: b\n')
       await flushPromises()
-      resolve('a', 'view: a\naxes: {}\n') // with a warning, if it were used
+      resolve(0, 'a', 'view: a\naxes: {}\n') // with a warning, if it were used
       await flushPromises()
       expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(false)
     })
@@ -391,8 +403,155 @@ describe('ForceView', () => {
         profileSource: source,
       })
       wrapper.unmount()
-      resolve('a', 'view: a\n')
+      resolve(0, 'a', 'view: a\n')
       await flushPromises() // no error
+    })
+
+    it('applies the profile only to the network and the snapshot being shown (target)', async () => {
+      const source: ProfileSource = () =>
+        Promise.resolve([
+          { name: 'here', documents: [{ view: 'v', target: { network: 'nw', snapshot: 's.' } }] },
+          { name: 'there', documents: [{ view: 'v', target: { network: 'nw', snapshot: 'x.' } }] },
+        ])
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'here',
+        profileSource: source,
+      })
+      current = wrapper
+      await flushPromises()
+      expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(false)
+      await wrapper.setProps({ profile: 'there' })
+      await flushPromises()
+      expect(errorText(wrapper)).toContain("profile 'there' does not apply to nw / ss")
+    })
+
+    describe('changing the engine', () => {
+      const okFiles: ProfileFile[] = [
+        {
+          name: 'f',
+          documents: [
+            { view: 'v', target: { layer: 'layer1' }, tiers: ['t'], rules: [{ select: '*', tier: 't' }] },
+          ],
+        },
+      ]
+
+      it('arranges once, after the profiles are loaded, when the engine is changed to schematic', async () => {
+        const { source, resolveFiles } = (() => {
+          let resolveFiles: (files: ProfileFile[]) => void = () => undefined
+          const source: ProfileSource = () => new Promise((resolve) => (resolveFiles = resolve))
+          return { source, resolveFiles: (files: ProfileFile[]) => resolveFiles(files) }
+        })()
+        const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+          engine: 'stress',
+          profileSource: source,
+        })
+        current = wrapper
+        vi.mocked(layoutSchematic).mockClear()
+        await wrapper.setProps({ engine: 'schematic' })
+        await flushPromises()
+        expect(layoutSchematic).not.toHaveBeenCalled() // the lower layers are loaded, the profiles are not
+        resolveFiles(okFiles)
+        await flushPromises()
+        await vi.waitFor(() => expect(layoutSchematic).toHaveBeenCalled())
+        await flushPromises()
+        const calls = vi.mocked(layoutSchematic).mock.calls.filter(([input]) => input.layer === 'layer1')
+        expect(calls).toHaveLength(1)
+        expect(calls[0]?.[0].profile?.view).toBe('v')
+      })
+
+      it('does not arrange by the schematic layout when the engine is changed from it, and does not load the profiles again', async () => {
+        const source = vi.fn<ProfileSource>(() => Promise.resolve(okFiles))
+        const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+          engine: 'schematic',
+          profileSource: source,
+        })
+        current = wrapper
+        await vi.waitFor(() => expect(wrapper.find('[data-testid=report-source]').exists()).toBe(true))
+        await flushPromises()
+        vi.mocked(layoutSchematic).mockClear()
+        await wrapper.setProps({ engine: 'stress' })
+        await flushPromises()
+        expect(layoutSchematic).not.toHaveBeenCalled()
+        await wrapper.setProps({ engine: 'schematic' })
+        await flushPromises()
+        await vi.waitFor(() => expect(layoutSchematic).toHaveBeenCalled())
+        expect(source).toHaveBeenCalledTimes(1) // the same profiles: not loaded again
+      })
+    })
+
+    describe('automatic selection (without ?profile=)', () => {
+      const files: ProfileSource = () =>
+        Promise.resolve([
+          {
+            name: 'asis',
+            documents: [
+              {
+                view: 'v',
+                target: { network: 'nw', snapshot: 'other', layer: 'layer1' },
+                tiers: ['t'],
+                rules: [{ select: '*', tier: 't' }],
+              },
+              {
+                view: 'v',
+                target: { network: 'nw', snapshot: 'ss', layer: 'layer1' },
+                tiers: ['t'],
+                rules: [{ select: '*', tier: 't' }],
+              },
+            ],
+          },
+        ])
+
+      it('uses the profile whose target accepts the network, the snapshot and the layer, and tells which', async () => {
+        const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+          engine: 'schematic',
+          profileSource: files,
+        })
+        current = wrapper
+        await vi.waitFor(() => expect(wrapper.find('[data-testid=report-source]').exists()).toBe(true))
+        const layer1 = wrapper.get('[data-layer=layer1] [data-testid=report-source]').text()
+        expect(layer1).toBe('profile asis #2 (by target)') // the 2nd document: the snapshot is `ss`
+        expect(wrapper.find('[data-testid=report-note]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(false)
+      })
+
+      it('tells that no profile applies, and arranges without profiles', async () => {
+        const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+          engine: 'schematic',
+          profileSource: () =>
+            Promise.resolve([{ name: 'x', documents: [{ view: 'v', target: { network: 'elsewhere' } }] }]),
+        })
+        current = wrapper
+        await vi.waitFor(() => expect(wrapper.find('[data-testid=report-note]').exists()).toBe(true))
+        expect(wrapper.get('[data-testid=report-note]').text()).toContain('no profile applies')
+        expect(count(wrapper, 'g.node:not(.tp)')).toBe(3)
+      })
+
+      it('tells that the profiles cannot be loaded (e.g. an old backend), and arranges without profiles', async () => {
+        const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+          engine: 'schematic',
+          profileSource: () => Promise.reject(new Error('Not Found')),
+        })
+        current = wrapper
+        await vi.waitFor(() => expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(true))
+        expect(errorText(wrapper)).toBe('profiles: Not Found')
+        await vi.waitFor(() => expect(count(wrapper, 'g.node:not(.tp)')).toBe(3))
+      })
+
+      it('does not load the profiles for the other engines, and loads them when the engine is changed', async () => {
+        const source = vi.fn(files)
+        const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+          engine: 'stress',
+          profileSource: source,
+        })
+        current = wrapper
+        await flushPromises()
+        expect(source).not.toHaveBeenCalled()
+        await wrapper.setProps({ engine: 'schematic' })
+        await flushPromises()
+        expect(source).toHaveBeenCalledTimes(1)
+        expect(source).toHaveBeenCalledWith('nw')
+      })
     })
 
     it('tells the warnings of the profile, and clears the message when the profile is removed', async () => {
@@ -404,7 +563,7 @@ describe('ForceView', () => {
       current = wrapper
       await flushPromises()
       expect(errorText(wrapper)).toContain("unknown key 'axes'")
-      await wrapper.setProps({ profile: undefined })
+      await wrapper.setProps({ profile: undefined, engine: 'stress' }) // nothing is loaded for the other engines
       await flushPromises()
       expect(wrapper.find('[data-testid=profile-error]').exists()).toBe(false)
     })

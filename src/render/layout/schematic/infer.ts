@@ -1,7 +1,7 @@
 import { stringify } from 'yaml'
 import { compareNames } from '../bands'
 import { dominantShape, regexSourceOf, type Token } from './nameShape'
-import { ProfileError, parseProfiles } from './profile'
+import { ProfileError, parseProfile } from './profile'
 import type { DiagramProfile, SchematicNode } from './types'
 
 export interface Inferred {
@@ -177,7 +177,7 @@ export function inferProfile(nodes: readonly SchematicNode[], links: readonly Li
     }
   }
 
-  // the draft: the same form as a hand-written profile (it is read back by the parser, so the two are the same)
+  // the draft: the same form as a hand-written profile (the tests read the YAML back, so the two are the same)
   // The other tokens are not captured: annotate makes the pair key of the captures, which must be the same as the
   // grouping above (the same site and role).
   const groupName = (position: number) =>
@@ -203,8 +203,7 @@ export function inferProfile(nodes: readonly SchematicNode[], links: readonly Li
   }
   const yaml = `# Draft of the diagram profile inferred from the names and the links. Correct it and keep it as a profile.\n${stringify(draft)}`
   try {
-    const profile = parseProfiles(yaml).profiles[0]
-    return profile ? { profile, yaml } : undefined
+    return { profile: parseProfile(draft, []), yaml }
   } catch (error) {
     if (error instanceof ProfileError) return undefined
     throw error

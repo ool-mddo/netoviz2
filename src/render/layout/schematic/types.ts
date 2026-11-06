@@ -26,11 +26,12 @@ export interface ProfileRule {
 /**
  * Diagram profile: how to read the structure of a topology as a diagram (what the axes mean, which node is in
  * which group/tier). It is separated from the topology (data) as CSS is from HTML. See the design in
- * the playground `docs/work/plans/netoviz2_schematic_layout.md`.
+ * `docs/design/schematic_layout.md`.
  */
 export interface DiagramProfile {
   view: string
-  target: { network?: string; layer?: string }
+  /** Where the profile is applied (an omitted item accepts anything): `snapshot` is matched as a whole name */
+  target: { network?: string; snapshot?: RegExp; layer?: string }
   /** Names of the tiers from the top (upstream) to the bottom */
   tiers: string[]
   /** Regular expression with named groups to split the name of a node (matched against `name`, not the ID) */

@@ -5,16 +5,16 @@ import { mddoMregnwLayer1, mddoBgpLayer1, mddoNetworkLayer1 } from '../../../tes
 import { mddoFwLayer } from '../../../test/mddoFwStack'
 import { layoutSchematic } from './index'
 import { mddoFwBasesOf } from './testing'
-import { parseProfiles } from './profile'
+import { parseProfiles } from '../../../test/profileYaml'
 import type { SchematicReport } from './types'
-import { loadProfiles } from './profileSource'
+import { mddoFwProfiles } from '../../../test/mddoFwProfile'
 
 const SITES = ['a', 'b', 'c']
 const ROLES = ['br', 'fw', 'cr', 'seg', 'host']
 
 async function arrange() {
   const input = mddoFwLayer1()
-  const { profiles } = await loadProfiles('mddo-fw')
+  const { profiles } = await mddoFwProfiles()
   const positions = await layoutSchematic({ ...input, profile: profiles[0]! })
   const at = (name: string) => positions.get(`layer1/${name}`)!
   return { input, positions, at }
@@ -34,7 +34,7 @@ describe('layoutSchematic without a usable profile', () => {
   })
 
   it('falls back to the stress layout when the profile gives no tier to any node', async () => {
-    const { profiles } = await loadProfiles('mddo-fw')
+    const { profiles } = await mddoFwProfiles()
     const nodes = [{ id: 'x', name: 'unrelated', radius: 11 }]
     const positions = await layoutSchematic({ layer: 'l', nodes, links: [], profile: profiles[0]! })
     expect(positions.has('x')).toBe(true)
@@ -105,7 +105,7 @@ function rowsOf(positions: Map<string, { x: number; y: number }>): string[][] {
 describe('layoutSchematic without a profile (inferred)', () => {
   it('mddo-fw: the same relative order of the nodes as the hand-written profile', async () => {
     const input = mddoFwLayer1()
-    const { profiles } = await loadProfiles('mddo-fw')
+    const { profiles } = await mddoFwProfiles()
     const written = await layoutSchematic({ ...input, profile: profiles[0]! })
     const inferred = await layoutSchematic(input)
     expect(rowsOf(inferred)).toEqual(rowsOf(written))
@@ -158,7 +158,7 @@ describe('layoutSchematic without a profile (inferred)', () => {
 describe('layoutSchematic with a given profile', () => {
   it('uses the given profile (not the inferred one) and reports the unpaired nodes', async () => {
     const input = mddoFwLayer1()
-    const { profiles } = await loadProfiles('mddo-fw')
+    const { profiles } = await mddoFwProfiles()
     const nodes = input.nodes.filter((n) => n.name !== 'site-a-br-2') // site-a-br-1 has no partner
     const reports: SchematicReport[] = []
     await layoutSchematic({ ...input, nodes, profile: profiles[0]!, report: (r) => reports.push(r) })
@@ -352,5 +352,141 @@ describe('layoutSchematic by inheritance (mddo-fw layer3 and layer2 from layer1)
     expect(['layer1', 'layer2']).toContain(first.reports[0]?.base)
     const layer1 = parseProfiles('view: v\ninherit: { from: layer1 }\n').profiles[0]!
     expect((await arrangeLayer('layer3', { profile: layer1 })).reports[0]).toMatchObject({ base: 'layer1' })
+  })
+})
+
+describe('layoutSchematic with a profile of a layer without a lower layer (connection points)', () => {
+  const YAML = `
+view: logical
+target: { layer: layer3 }
+tiers: [wan, fw, core, segment, host]
+name: '^site-(?<site>[a-z])-(?<role>[a-z]+)-?(?<index>\\d+)$'
+rules:
+  - { select: '*', group: site, pair: { by: index, primary: '1' } }
+  - { select: '[role=br]', tier: wan }
+  - { select: '[role=fw]', tier: fw }
+  - { select: '[role=cr]', tier: core }
+  - { select: '[role=host]', tier: host }
+  - { select: '[site=a]', order: 1 }
+  - { select: '[site=b]', order: 2 }
+  - { select: '[site=c]', order: 3 }
+`
+  async function arrangeLayer3() {
+    const input = mddoFwLayer('layer3')
+    const reports: SchematicReport[] = []
+    const positions = await layoutSchematic({
+      ...input,
+      profile: parseProfiles(YAML).profiles[0]!,
+      report: (r) => reports.push(r),
+    })
+    return { input, positions, report: reports[0]! }
+  }
+
+  it('puts the segments (no tier, linked to two or more devices) between the devices, not in a row of their own', async () => {
+    const { input, positions, report } = await arrangeLayer3()
+    const segments = input.nodes.filter((n) => n.name.startsWith('Seg_'))
+    expect(segments).toHaveLength(30)
+    expect(report.source).toBe('profile')
+    expect(report.violations).toEqual([]) // the connection points are not exceptions
+    const rows = new Set(
+      input.nodes.filter((n) => !n.name.startsWith('Seg_')).map((n) => Math.round(positions.get(n.id)!.y)),
+    )
+    expect(rows.size).toBe(4) // br, fw, cr, host
+    const bottom = Math.max(...rows)
+    // a segment between the rows is between the devices it is linked to; no segment is at the bottom
+    for (const seg of segments) {
+      const ys = input.links
+        .filter((l) => l.source === seg.id || l.target === seg.id)
+        .map((l) => positions.get(l.source === seg.id ? l.target : l.source)!.y)
+      const y = positions.get(seg.id)!.y
+      if (Math.max(...ys) - Math.min(...ys) > 1) {
+        expect(y).toBeGreaterThanOrEqual(Math.min(...ys))
+        expect(y).toBeLessThanOrEqual(Math.max(...ys))
+      }
+      expect(y).toBeLessThan(bottom)
+    }
+  })
+
+  it('keeps the nodes apart, with far fewer crossings than the segments in a row at the bottom', async () => {
+    const { input, positions } = await arrangeLayer3()
+    const quality = layoutQuality(
+      input.nodes.map((n) => ({ id: n.id, ...positions.get(n.id)!, radius: n.radius })),
+      input.links,
+    )
+    expect(quality.overlap).toBe(0)
+    expect(quality.crossings).toBeLessThan(50) // 656 when the segments are put in a row at the bottom
+  })
+
+  it('tells a node without a tier which is linked to fewer than two classified nodes', async () => {
+    const nodes = [
+      { id: 'site-a-br-1', name: 'site-a-br-1', radius: 11 },
+      { id: 'site-a-fw-1', name: 'site-a-fw-1', radius: 11 },
+      { id: 'dangling', name: 'dangling', radius: 11 },
+      { id: 'joint', name: 'joint', radius: 11 },
+    ]
+    const links = [
+      { source: 'site-a-br-1', target: 'site-a-fw-1' },
+      { source: 'site-a-br-1', target: 'dangling' },
+      { source: 'site-a-br-1', target: 'joint' },
+      { source: 'site-a-fw-1', target: 'joint' },
+    ]
+    const reports: SchematicReport[] = []
+    const positions = await layoutSchematic({
+      layer: 'l',
+      nodes,
+      links,
+      profile: parseProfiles(YAML).profiles[0]!,
+      report: (r) => reports.push(r),
+    })
+    expect(reports[0]!.violations.filter((v) => v.code === 'unclassified').map((v) => v.id)).toEqual([
+      'dangling',
+    ])
+    const [br, fw, joint] = ['site-a-br-1', 'site-a-fw-1', 'joint'].map((id) => positions.get(id)!)
+    expect(joint!.y).toBeGreaterThan(br!.y - 1)
+    expect(joint!.y).toBeLessThan(fw!.y + 1)
+  })
+
+  it('does not take the nodes without a tier for connection points when the arrangement can be inherited (they are exceptions)', async () => {
+    const nodes = [
+      { id: 'site-a-br-1', name: 'site-a-br-1', radius: 11 },
+      { id: 'site-a-fw-1', name: 'site-a-fw-1', radius: 11 },
+      { id: 'missed', name: 'missed', radius: 11 }, // a device which the profile missed
+    ]
+    const links = [
+      { source: 'site-a-br-1', target: 'site-a-fw-1' },
+      { source: 'site-a-br-1', target: 'missed' },
+      { source: 'site-a-fw-1', target: 'missed' },
+    ]
+    const unfit = { layer: 'lower', nodes: [], links: [], lowerOf: new Map<string, readonly string[]>() }
+    const reportsOf = async (bases: Array<typeof unfit>) => {
+      const reports: SchematicReport[] = []
+      await layoutSchematic({
+        layer: 'l',
+        nodes,
+        links,
+        profile: parseProfiles(YAML).profiles[0]!,
+        bases,
+        report: (r) => reports.push(r),
+      })
+      return reports[0]!.violations.filter((v) => v.code === 'unclassified').map((v) => v.id)
+    }
+    expect(await reportsOf([])).toEqual([]) // no lower layer: a connection point
+    expect(await reportsOf([unfit])).toEqual(['missed']) // a lower layer is given: an exception
+  })
+
+  it('reports a node which the inferred profile misses even if it is linked to two classified nodes', async () => {
+    const reports: SchematicReport[] = []
+    await layoutSchematic({
+      ...mddoFwLayer('layer1'),
+      nodes: [...mddoFwLayer('layer1').nodes, { id: 'layer1/odd', name: 'odd', radius: 11 }],
+      links: [
+        ...mddoFwLayer('layer1').links,
+        { source: 'layer1/odd', target: 'layer1/site-a-br-1' },
+        { source: 'layer1/odd', target: 'layer1/site-a-fw-1' },
+      ],
+      report: (r) => reports.push(r),
+    })
+    expect(reports[0]!.source).toBe('inferred')
+    expect(reports[0]!.violations.map((v) => v.id)).toContain('layer1/odd')
   })
 })

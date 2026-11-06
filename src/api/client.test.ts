@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, getAttributes, getLayer, getSummary, MAX_ATTRIBUTE_IDS } from './client'
+import { ApiError, getAttributes, getLayer, getProfiles, getSummary, MAX_ATTRIBUTE_IDS } from './client'
 
 function mockFetch(handler: (url: string, init?: RequestInit) => Response) {
   const fetchMock = vi.fn((url: string, init?: RequestInit) => Promise.resolve(handler(url, init)))
@@ -10,6 +10,30 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe('getProfiles', () => {
+  it('requests the profile files of the network (not under a snapshot; the name is encoded)', async () => {
+    const files = [{ name: 'asis', documents: [{ view: 'v' }] }]
+    const fetchMock = mockFetch(() => json({ network: 'nw/1', profiles: files }))
+    expect(await getProfiles('nw/1')).toEqual(files)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/topologies/nw%2F1/netoviz2/profiles')
+  })
+
+  it('throws ApiError which tells that an old backend does not have the API', async () => {
+    mockFetch(() => json({ error: 'Not Found' }, 404))
+    await expect(getProfiles('nw')).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining('does not provide the profile API') as string,
+    })
+  })
+
+  it('rejects a response which is not in the form (e.g. another route of an old backend)', async () => {
+    for (const body of [{}, { profiles: 'x' }, { profiles: [{ name: 'a' }] }, { profiles: [null] }, null]) {
+      mockFetch(() => json(body))
+      await expect(getProfiles('nw')).rejects.toMatchObject({ status: 502 })
+    }
+  })
+})
 
 describe('getSummary', () => {
   it('requests the summary of the snapshot (names are encoded)', async () => {
