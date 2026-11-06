@@ -497,6 +497,38 @@ describe('ForceRenderer', () => {
         expect(pos('l1/b')[0] - pos('l1/a')[0]).toBeCloseTo(100, 3)
       })
 
+      describe('moving a node by hand', () => {
+        type Manual = {
+          bodies: Array<{ id: string; x: number; y: number }>
+          startManualMove(d: unknown): void
+          manualMove(d: unknown, x: number, y: number, mouse?: Partial<MouseEvent>): void
+        }
+        const drag = async (key: Partial<MouseEvent>, dx: number, dy: number) => {
+          makeSchematic(lineSchematic()).setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          const internals = renderer as unknown as Manual
+          const a = internals.bodies.find((b) => b.id === 'l1/a')!
+          const before = { a: pos('l1/a'), b: pos('l1/b') }
+          internals.startManualMove(a)
+          internals.manualMove(a, a.x + dx, a.y + dy, key)
+          return { before, after: { a: pos('l1/a'), b: pos('l1/b') } }
+        }
+
+        it('moves only the node, rounded to the grid, without the simulation', async () => {
+          const { before, after } = await drag({}, 14, 6)
+          expect(after.a).toEqual([before.a[0] + 10, before.a[1] + 10])
+          expect(after.b).toEqual(before.b)
+        })
+
+        it('moves the nodes in the row with the shift key, and the nodes in the column with the control key', async () => {
+          const row = await drag({ shiftKey: true }, 20, 0)
+          expect(row.after.a[0] - row.before.a[0]).toBe(20)
+          expect(row.after.b[0] - row.before.b[0]).toBe(20) // (a and b are in the same row)
+          const column = await drag({ ctrlKey: true }, 20, 0)
+          expect(column.after.b).toEqual(column.before.b) // (b is not in the column of a)
+        })
+      })
+
       it('passes the names of the nodes and the links in the layer', async () => {
         const layout = lineSchematic()
         makeSchematic(layout).setGraph(collapsed, ['l1', 'l2'])

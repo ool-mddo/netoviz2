@@ -81,6 +81,8 @@ export interface Inherited {
   hints: Map<string, number>
   /** Row for the devices which got no tier (after the last row) */
   unclassifiedRow: number
+  /** For each device supported by one node of the base layer, that node (the device follows it) */
+  follows: Map<string, string>
 }
 
 /**
@@ -102,6 +104,7 @@ export function inheritAnnotations(
   const devices: SchematicNode[] = []
   const connectors: SchematicNode[] = []
   const unclassified: string[] = []
+  const follows = new Map<string, string>()
   // how many nodes of the layer are supported by only the same node of the base layer (e.g. the interfaces of a device)
   const sameSupporter = new Map<string, number>()
   for (const node of nodes) {
@@ -133,6 +136,7 @@ export function inheritAnnotations(
       unclassified.push(node.id)
       continue
     }
+    if (supporters[0] !== undefined) follows.set(node.id, supporters[0])
     annotation.tier = info.tier
     annotation.tierIndex = info.tierIndex
     if (info.group !== undefined) annotation.group = info.group
@@ -156,5 +160,6 @@ export function inheritAnnotations(
     connectors,
     hints,
     unclassifiedRow,
+    follows,
   }
 }

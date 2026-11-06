@@ -22,11 +22,13 @@ import { layoutSchematic } from './layout/schematic'
 import { routeAround, type Obstacle, type RouteEnd, type RouteRequest } from './linkRouter'
 import { roundedPolyline } from './path'
 import { selectProfile } from './layout/schematic/profile'
+import { moveNodes, snapDelta } from './layout/schematic/move'
 import type {
   DiagramProfile,
   SchematicBase,
   SchematicLayerFn,
   SchematicReport,
+  SchematicStructure,
 } from './layout/schematic/types'
 import {
   type LayerLayoutFn,
@@ -62,6 +64,8 @@ export function layerColor(layer: string, layerOrder: readonly string[]): string
  * pulled back to where they were (so that the layout changes gently and mostly near the dragged node)
  */
 const DRAG_ALPHA = 0.1
+/** (schematic layout) the movement of a dragged node is rounded to this grid (the movement, so the rows stay aligned) */
+const SCHEMATIC_GRID = 10
 const DRAG_ANCHOR_STRENGTH = 0.12
 const DRAG_CHARGE_SCALE = 0.3
 const DRAG_VELOCITY_DECAY = 0.6
@@ -213,6 +217,10 @@ export class ForceRenderer {
   /** Element under the pointer (shown with its links) */
   private hoverId: string | null = null
   private userMoved = false
+  /** (schematic layout) how the nodes of each layer were arranged, to move them by hand (by the layer) */
+  private structures = new Map<string, SchematicStructure>()
+  /** (schematic layout) connection points which the user moved by hand: they are not put between the devices again */
+  private readonly pinnedConnectors = new Set<string>()
   /** Weakens the repulsion while the layout follows a dragged node (stress layout) */
   private chargeScale = 1
   /** positions the nodes are pulled back to (only while the layout follows a dragged node) */
@@ -335,6 +343,7 @@ export class ForceRenderer {
   relayout(): void {
     this.positions.clear()
     this.pinnedAngles.clear()
+    this.pinnedConnectors.clear()
     this.bodies = []
     this.appliedSignature = ''
     this.userMoved = false
@@ -510,6 +519,9 @@ export class ForceRenderer {
           report: (report) => {
             if (token === this.layoutToken) this.onSchematicReport(report)
           },
+          structure: (structure) => {
+            if (token === this.layoutToken) this.structures.set(structure.layer, structure)
+          },
           ...(profile ? { profile } : {}),
         })
       }
@@ -532,6 +544,7 @@ export class ForceRenderer {
     started: number,
     signature: string,
   ): Promise<void> {
+    this.structures = new Map()
     const byLayer = new Map<string, Item[]>()
     for (const body of this.bodies) byLayer.set(body.layer, [...(byLayer.get(body.layer) ?? []), body])
     const layers = [...byLayer].sort(
@@ -780,7 +793,13 @@ export class ForceRenderer {
       .filter((d) => d.type === 'node')
       .call(
         drag<SVGGElement, Item>()
+          // (Ctrl + drag moves a column in the schematic layout)
+          .filter((event: MouseEvent) => !event.button && (this.engine === 'schematic' || !event.ctrlKey))
           .on('start', (event, d) => {
+            if (this.engine === 'schematic') {
+              this.startManualMove(d)
+              return
+            }
             // also in the other engines, the other nodes follow the dragged node (force simulation)
             this.holdLayout(true)
             if (!event.active)
@@ -792,10 +811,18 @@ export class ForceRenderer {
           })
           .on('drag', (event, d) => {
             this.userMoved = true
+            if (this.engine === 'schematic') {
+              this.manualMove(d, event.x, event.y, event.sourceEvent as MouseEvent | undefined)
+              return
+            }
             d.fx = event.x
             d.fy = event.y
           })
           .on('end', (event, d) => {
+            if (this.engine === 'schematic') {
+              this.manualFrom = null
+              return
+            }
             if (!event.active) this.simulation.alphaTarget(0)
             d.fx = null
             d.fy = null
@@ -809,6 +836,49 @@ export class ForceRenderer {
       .attr('text-anchor', 'middle')
       .attr('dy', (d) => (d.type === 'node' ? d.radius + 12 : 0))
       .text((d) => d.name)
+  }
+
+  /** (schematic layout) positions of the nodes and of the dragged node when a drag started */
+  private manualFrom: { positions: Map<string, Position>; start: Position } | null = null
+
+  private startManualMove(d: Item): void {
+    this.simulation.stop() // (the layout is not moved by the simulation: the nodes are only where they are put)
+    this.manualFrom = {
+      positions: new Map(this.bodies.map((b) => [b.id, { x: b.x ?? 0, y: b.y ?? 0 }])),
+      start: { x: d.x ?? 0, y: d.y ?? 0 },
+    }
+  }
+
+  /**
+   * (schematic layout) Move the dragged node by hand, rounded to the grid. Shift: the nodes in the row, Ctrl / Meta:
+   * the nodes in the column. The devices which follow it in the other layers move with it, and the connection points
+   * are put between the devices again. (The others are not moved: the layout is not moved by the simulation.)
+   */
+  private manualMove(d: Item, x: number, y: number, mouse?: MouseEvent): void {
+    const from = this.manualFrom
+    if (!from) return
+    const scope = mouse?.shiftKey ? 'row' : mouse?.ctrlKey || mouse?.metaKey ? 'column' : 'node'
+    const delta = snapDelta({ x: x - from.start.x, y: y - from.start.y }, SCHEMATIC_GRID)
+    const isConnector = this.structures.get(d.layer)?.connectors.some((c) => c.id === d.id) ?? false
+    if (isConnector) this.pinnedConnectors.add(d.id)
+    const moved = moveNodes({
+      id: d.id,
+      scope,
+      from: from.positions,
+      delta,
+      structures: this.structures,
+      layerOf: (id) => this.itemById.get(id)?.layer,
+      radiusOf: (id) => this.radiusOf(id),
+      pinned: this.pinnedConnectors,
+    })
+    // the nodes which were moved before in this drag but not now (e.g. the key is released) go back
+    for (const body of this.bodies) {
+      const [origin, p] = [from.positions.get(body.id), moved.get(body.id)]
+      if (p) Object.assign(body, { x: p.x, y: p.y, vx: 0, vy: 0 })
+      else if (origin) Object.assign(body, { x: origin.x, y: origin.y, vx: 0, vy: 0 })
+    }
+    this.placePorts()
+    this.draw()
   }
 
   /**
