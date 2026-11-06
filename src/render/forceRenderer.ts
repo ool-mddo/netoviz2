@@ -19,7 +19,7 @@ import { layoutWithStress } from './layout/stress'
 import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
 import { layoutSchematic } from './layout/schematic'
-import { routeKey } from './layout/schematic/routes'
+import { routeAround, type Obstacle, type RouteEnd, type RouteRequest } from './linkRouter'
 import { roundedPolyline } from './path'
 import { selectProfile } from './layout/schematic/profile'
 import type {
@@ -68,6 +68,8 @@ const DRAG_VELOCITY_DECAY = 0.6
 const NODE_RADIUS = 11
 /** Radius of the corners of the links which go around the nodes */
 const ROUTE_CORNER = 6
+/** The making of the routes which takes longer than this (ms) is not done on every frame */
+const ROUTE_BUDGET_MS = 6
 const PORT_RADIUS = 4.5
 /** Length of the arc of a node circle reserved for a port */
 const PORT_ARC = 14
@@ -169,10 +171,14 @@ export class ForceRenderer {
   private schematicBases: ReadonlyMap<string, readonly SchematicBase[]>
   /** Changed when the lower layers are changed (to arrange the same graph again with them) */
   private basesVersion = 0
-  /** Routes of the links which a straight line would pass through a node (waypoints, by the key of the nodes) */
+  /** Routes of the links which a straight line would pass through a node or a port (waypoints, by the ID of the link) */
   private routes = new Map<string, Position[]>()
-  /** Routes of the latest schematic layout, by the layer (the coordinates of the layer) */
-  private layoutRoutes = new Map<string, ReadonlyMap<string, Position[]>>()
+  /** The positions which the routes were made from (to make them again only if something moved) */
+  private routesFor = ''
+  /** How long the last making of the routes took (ms), and when it was done: a heavy one is not done on every frame */
+  private routeCost = 0
+  private routesAt = 0
+  private routeTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onLayout: (stats: LayoutStats | null) => void
   private readonly onSchematicReport: (report: SchematicReport) => void
   private graph: DisplayGraph = { nodes: [], links: [] }
@@ -368,6 +374,8 @@ export class ForceRenderer {
 
   destroy(): void {
     this.simulation.stop()
+    if (this.routeTimer) clearTimeout(this.routeTimer)
+    this.routeTimer = null
     const svgSelection = select(this.svg)
     svgSelection.on('.zoom', null).on('click.background', null)
     this.svg.classList.remove('zoomed-in')
@@ -408,6 +416,7 @@ export class ForceRenderer {
     }
 
     this.drawLinks = graph.links.filter((link) => link.type === 'link')
+    this.routesFor = '' // (the links may have changed with the same nodes: the routes are made again)
     const nodeOf = (id: string) => this.itemById.get(id)?.parent ?? id
     const bundles = new Map<string, SimLink>()
     this.peersOf = new Map()
@@ -440,7 +449,6 @@ export class ForceRenderer {
     this.layoutStarted = started
     const layerLayout = this.layerLayoutOf(this.engine, token)
     if (!layerLayout) {
-      this.routes = new Map() // (only the schematic layout has routes)
       this.layout()
       this.reportLayout(started)
       return
@@ -461,9 +469,6 @@ export class ForceRenderer {
       return
     }
     this.onLayout(null)
-    // the routes are for the new layout (they are kept while the same graph is not arranged again)
-    this.routes = new Map()
-    this.layoutRoutes = new Map()
     void this.layoutByEngine(layerLayout, token, started, signature)
   }
 
@@ -493,9 +498,6 @@ export class ForceRenderer {
           })),
           links,
           ...(bases.length > 0 ? { bases } : {}),
-          routes: (routes) => {
-            if (token === this.layoutToken) this.layoutRoutes.set(layer, routes)
-          },
           // the report of an old layout (a newer one has been started) is not told
           report: (report) => {
             if (token === this.layoutToken) this.onSchematicReport(report)
@@ -541,20 +543,10 @@ export class ForceRenderer {
     if (token !== this.layoutToken) return // a newer layout has been started
 
     const extents = results.map(({ layer, items, positions }) => {
-      // (the routes of the links go out of the nodes: they are in the box of the layer)
-      const waypoints = [...(this.layoutRoutes.get(layer)?.values() ?? [])].flat()
-      const xs = items
-        .map((item) => (positions.get(item.id)?.x ?? 0) - item.radius)
-        .concat(waypoints.map((p) => p.x))
-      const ys = items
-        .map((item) => (positions.get(item.id)?.y ?? 0) - item.radius)
-        .concat(waypoints.map((p) => p.y))
-      const xe = items
-        .map((item) => (positions.get(item.id)?.x ?? 0) + item.radius)
-        .concat(waypoints.map((p) => p.x))
-      const ye = items
-        .map((item) => (positions.get(item.id)?.y ?? 0) + item.radius)
-        .concat(waypoints.map((p) => p.y))
+      const xs = items.map((item) => (positions.get(item.id)?.x ?? 0) - item.radius)
+      const ys = items.map((item) => (positions.get(item.id)?.y ?? 0) - item.radius)
+      const xe = items.map((item) => (positions.get(item.id)?.x ?? 0) + item.radius)
+      const ye = items.map((item) => (positions.get(item.id)?.y ?? 0) + item.radius)
       const [minX, minY] = [Math.min(...xs), Math.min(...ys)]
       return { key: layer, width: Math.max(...xe) - minX, height: Math.max(...ye) - minY, minX, minY }
     })
@@ -570,15 +562,6 @@ export class ForceRenderer {
           vx: 0,
           vy: 0,
         })
-      }
-      // the routes are moved with the layer
-      if (offset && extent) {
-        for (const [key, points] of this.layoutRoutes.get(layer) ?? []) {
-          this.routes.set(
-            key,
-            points.map((p) => ({ x: offset.x + p.x - extent.minX, y: offset.y + p.y - extent.minY })),
-          )
-        }
       }
     }
     this.appliedSignature = signature
@@ -896,10 +879,10 @@ export class ForceRenderer {
     if (!this.userMoved && this.ticks % FIT_INTERVAL_TICKS === 0) this.fit()
   }
 
-  /** Path of a link: a straight line */
+  /** Path of a link: a straight line, or a polyline with rounded corners around the nodes and the ports */
   private pathOf(link: DisplayLink): string {
     const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
-    const route = this.routeOf(from, to)
+    const route = this.routes.get(link.id)
     const [a, b] = [
       { x: from?.x ?? 0, y: from?.y ?? 0 },
       { x: to?.x ?? 0, y: to?.y ?? 0 },
@@ -907,18 +890,68 @@ export class ForceRenderer {
     return route ? roundedPolyline([a, ...route, b], ROUTE_CORNER) : `M${a.x},${a.y} L${b.x},${b.y}`
   }
 
-  /** Waypoints of the link, from its source to its target (undefined: a straight line) */
-  private routeOf(from: Item | undefined, to: Item | undefined): Position[] | undefined {
-    if (!from || !to || this.routes.size === 0) return undefined
-    // (the ends of a link between term-points are on their nodes)
-    const [source, target] = [from.parent ?? from.id, to.parent ?? to.id]
-    const route = this.routes.get(routeKey(source, target))
-    // (the waypoints are from the node of the smaller ID)
-    return route && (source < target ? route : [...route].reverse())
+  /**
+   * (schematic layout) Make the routes of the links from the current positions of the nodes and the ports: a link
+   * which a straight line passes through a node or a port goes around them. They follow the nodes and the ports
+   * which are moved. Nothing is made again if nothing moved.
+   */
+  private updateRoutes(): void {
+    if (this.engine !== 'schematic') {
+      this.routes = new Map()
+      this.routesFor = ''
+      return
+    }
+    const items = [...this.bodies, ...this.ports]
+    const key = items
+      .map((i) => `${i.id}:${Math.round((i.x ?? 0) * 2)},${Math.round((i.y ?? 0) * 2)}`)
+      .join('|')
+    if (key === this.routesFor) return
+    // A heavy making (more than the budget) is not done on every frame: the old routes are drawn, and the routes are made
+    // a little later (the positions are drawn at once, so the links follow the nodes, the routes with some delay).
+    const now = performance.now()
+    if (this.routeCost > ROUTE_BUDGET_MS && now - this.routesAt < this.routeCost * 3) {
+      this.routeTimer ??= setTimeout(() => {
+        this.routeTimer = null
+        this.draw()
+      }, this.routeCost * 3)
+      return
+    }
+    this.routesFor = key
+
+    const obstacles: Obstacle[] = items.map((item) => ({
+      id: item.id,
+      x: item.x ?? 0,
+      y: item.y ?? 0,
+      radius: item.type === 'tp' ? PORT_RADIUS : item.radius,
+    }))
+    const endOf = (item: Item): RouteEnd | undefined => {
+      if (item.type !== 'tp') return { x: item.x ?? 0, y: item.y ?? 0, node: item.id, radius: item.radius }
+      const node = item.parent ? this.itemById.get(item.parent) : undefined
+      if (!node) return undefined
+      const angle = item.angle ?? 0
+      return {
+        x: item.x ?? 0,
+        y: item.y ?? 0,
+        node: node.id,
+        port: item.id,
+        radius: node.radius,
+        outward: { x: Math.cos(angle), y: Math.sin(angle) },
+      }
+    }
+    const requests: RouteRequest[] = []
+    for (const link of this.drawLinks) {
+      const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
+      const [a, b] = [from && endOf(from), to && endOf(to)]
+      if (a && b) requests.push({ id: link.id, from: a, to: b })
+    }
+    this.routes = routeAround(requests, obstacles)
+    this.routeCost = performance.now() - now
+    this.routesAt = now
   }
 
   /** Draw the current positions */
   draw(): void {
+    this.updateRoutes()
     const at = (id: string) => this.itemById.get(id)
     this.linkLayer.selectAll<SVGPathElement, DisplayLink>('path').attr('d', (d) => this.pathOf(d))
     const nodes = this.nodeLayer.selectAll<SVGGElement, Item>('g.node')
