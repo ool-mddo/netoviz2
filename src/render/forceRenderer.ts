@@ -22,7 +22,7 @@ import { layoutSchematic } from './layout/schematic'
 import { routeAround, type Obstacle, type RouteEnd, type RouteRequest } from './linkRouter'
 import { roundedPolyline } from './path'
 import { selectProfile } from './layout/schematic/profile'
-import { moveNodes, snapDelta } from './layout/schematic/move'
+import { movingNodes, moveNodes, snapDelta, type MoveScope } from './layout/schematic/move'
 import type {
   DiagramProfile,
   SchematicBase,
@@ -221,6 +221,10 @@ export class ForceRenderer {
   private structures = new Map<string, SchematicStructure>()
   /** (schematic layout) connection points which the user moved by hand: they are not put between the devices again */
   private readonly pinnedConnectors = new Set<string>()
+  /** (schematic layout) the modifier keys held now (they decide what a drag moves: see manualMove) */
+  private keys = { shift: false, ctrl: false }
+  /** (schematic layout) the node being dragged by hand */
+  private draggedId: string | null = null
   /** Weakens the repulsion while the layout follows a dragged node (stress layout) */
   private chargeScale = 1
   /** positions the nodes are pulled back to (only while the layout follows a dragged node) */
@@ -257,6 +261,9 @@ export class ForceRenderer {
       })
     svgSelection.call(this.zoomBehavior).on('dblclick.zoom', null)
     svgSelection.on('click.background', () => this.callbacks.onSelect(null))
+    window.addEventListener('keydown', this.onKey)
+    window.addEventListener('keyup', this.onKey)
+    window.addEventListener('blur', this.onBlur)
 
     this.simulation = forceSimulation<Item, SimLink>()
       .force(
@@ -392,6 +399,9 @@ export class ForceRenderer {
     this.simulation.stop()
     if (this.routeTimer) clearTimeout(this.routeTimer)
     this.routeTimer = null
+    window.removeEventListener('keydown', this.onKey)
+    window.removeEventListener('keyup', this.onKey)
+    window.removeEventListener('blur', this.onBlur)
     const svgSelection = select(this.svg)
     svgSelection.on('.zoom', null).on('click.background', null)
     this.svg.classList.remove('zoomed-in')
@@ -821,6 +831,8 @@ export class ForceRenderer {
           .on('end', (event, d) => {
             if (this.engine === 'schematic') {
               this.manualFrom = null
+              this.draggedId = null
+              this.showWillMove()
               return
             }
             if (!event.active) this.simulation.alphaTarget(0)
@@ -843,6 +855,7 @@ export class ForceRenderer {
 
   private startManualMove(d: Item): void {
     this.simulation.stop() // (the layout is not moved by the simulation: the nodes are only where they are put)
+    this.draggedId = d.id
     this.manualFrom = {
       positions: new Map(this.bodies.map((b) => [b.id, { x: b.x ?? 0, y: b.y ?? 0 }])),
       start: { x: d.x ?? 0, y: d.y ?? 0 },
@@ -857,7 +870,9 @@ export class ForceRenderer {
   private manualMove(d: Item, x: number, y: number, mouse?: MouseEvent): void {
     const from = this.manualFrom
     if (!from) return
-    const scope = mouse?.shiftKey ? 'row' : mouse?.ctrlKey || mouse?.metaKey ? 'column' : 'node'
+    const scope = this.scopeOf(mouse?.shiftKey ?? false, (mouse?.ctrlKey || mouse?.metaKey) ?? false)
+    this.keys = { shift: scope === 'row', ctrl: scope === 'column' }
+    this.showWillMove()
     const delta = snapDelta({ x: x - from.start.x, y: y - from.start.y }, SCHEMATIC_GRID)
     const isConnector = this.structures.get(d.layer)?.connectors.some((c) => c.id === d.id) ?? false
     if (isConnector) this.pinnedConnectors.add(d.id)
@@ -929,6 +944,55 @@ export class ForceRenderer {
   private setHover(id: string | null): void {
     this.hoverId = id
     this.applyHover()
+    this.showWillMove()
+  }
+
+  private readonly onKey = (event: KeyboardEvent): void => {
+    this.setKeys(event.shiftKey, event.ctrlKey || event.metaKey)
+  }
+
+  private readonly onBlur = (): void => this.setKeys(false, false)
+
+  private setKeys(shift: boolean, ctrl: boolean): void {
+    if (shift === this.keys.shift && ctrl === this.keys.ctrl) return
+    this.keys = { shift, ctrl }
+    this.showWillMove()
+  }
+
+  /** What a drag moves: the node, its row (Shift) or its column (Ctrl / Meta) */
+  private scopeOf(shift: boolean, ctrl: boolean): MoveScope {
+    return shift ? 'row' : ctrl ? 'column' : 'node'
+  }
+
+  /**
+   * (schematic layout) Mark the nodes which a drag moves with the modifier keys held now (`will-move`: the nodes of the
+   * row / column of the layer, `will-follow`: the nodes of the other layers which move with them), for the node under
+   * the pointer or the node being dragged. Nothing is marked without a key (a drag moves only the node).
+   */
+  private showWillMove(): void {
+    let marked = new Map<string, boolean>() // ID => in the layer of the node
+    const scope = this.scopeOf(this.keys.shift, this.keys.ctrl)
+    const hovered = this.hoverId === null ? undefined : this.itemById.get(this.hoverId)
+    const target = this.draggedId ?? (hovered?.type === 'tp' ? hovered.parent : hovered?.id)
+    const layer = target === undefined || target === null ? undefined : this.itemById.get(target)?.layer
+    if (this.engine === 'schematic' && scope !== 'node' && target && layer !== undefined) {
+      const from =
+        this.manualFrom?.positions ?? new Map(this.bodies.map((b) => [b.id, { x: b.x ?? 0, y: b.y ?? 0 }]))
+      const ids = movingNodes({
+        id: target,
+        scope,
+        from,
+        delta: { x: 0, y: 0 },
+        structures: this.structures,
+        layerOf: (id) => this.itemById.get(id)?.layer,
+        radiusOf: (id) => this.radiusOf(id),
+      })
+      marked = new Map([...ids].map((id) => [id, this.itemById.get(id)?.layer === layer]))
+    }
+    this.nodeLayer
+      .selectAll<SVGGElement, Item>('g.node')
+      .classed('will-move', (d) => marked.get(d.id) === true)
+      .classed('will-follow', (d) => marked.get(d.id) === false)
   }
 
   private applyHover(): void {

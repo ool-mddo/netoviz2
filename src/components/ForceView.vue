@@ -316,6 +316,9 @@ function onEngineChange(event: Event): void {
       <span class="stats" data-testid="layout-stats" :data-engine="stats?.engine">{{
         arranging ? 'arranging...' : statsText
       }}</span>
+      <span v-if="engine === 'schematic'" class="hint" data-testid="drag-hint"
+        >Drag: move a node (10px grid) · Shift+drag: its row · Ctrl/⌘+drag: its column</span
+      >
       <span v-if="profileError" class="error" data-testid="profile-error">{{ profileError }}</span>
     </div>
     <SchematicReportPanel
@@ -336,6 +339,10 @@ function onEngineChange(event: Event): void {
   margin-bottom: 0.25rem;
 }
 .force-view .stats {
+  opacity: 0.7;
+  font-size: 0.8em;
+}
+.force-view .hint {
   opacity: 0.7;
   font-size: 0.8em;
 }
@@ -423,6 +430,17 @@ function onEngineChange(event: Event): void {
 .force-svg .node.hover text {
   font-weight: bold;
   display: block;
+}
+/* (schematic layout) the nodes a drag with Shift / Ctrl moves: in the layer, and in the other layers */
+.force-svg .node.will-move circle {
+  stroke: var(--changed);
+  stroke-width: 4;
+  filter: drop-shadow(0 0 4px var(--changed));
+}
+.force-svg .node.will-follow circle {
+  stroke: var(--changed);
+  stroke-width: 3;
+  stroke-dasharray: 3 2;
 }
 /* the other end of the links of the hovered term-point */
 .force-svg .node.peer circle {

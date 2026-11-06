@@ -514,6 +514,19 @@ describe('ForceRenderer', () => {
           return { before, after: { a: pos('l1/a'), b: pos('l1/b') } }
         }
 
+        it('marks the nodes a drag moves while Shift is held on the node under the pointer', async () => {
+          makeSchematic(lineSchematic()).setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          const marked = () =>
+            [...svg.querySelectorAll('g.node.will-move')].map((n) => n.getAttribute('data-id'))
+          nodeEl('l1/a').dispatchEvent(new MouseEvent('mouseenter'))
+          expect(marked()).toEqual([])
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true }))
+          expect(marked().sort()).toEqual(['l1/a', 'l1/b'])
+          window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }))
+          expect(marked()).toEqual([])
+        })
+
         it('moves only the node, rounded to the grid, without the simulation', async () => {
           const { before, after } = await drag({}, 14, 6)
           expect(after.a).toEqual([before.a[0] + 10, before.a[1] + 10])
