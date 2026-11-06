@@ -39,7 +39,7 @@ NETOVIZ2_API_URL=http://<host>:15000 npm run dev
 - 表示の例 (`<network>` / `<snapshot>` は `http://localhost:15000/topologies/index` で確認できる):
   - 一覧: `http://localhost:5173/netoviz2/`
   - トポロジ: `http://localhost:5173/netoviz2/<network>/<snapshot>`
-  - 状態は URL で指定できる: `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force>&dependency=1` (ID は URL エンコードする)。
+  - 状態は URL で指定できる: `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1` (ID は URL エンコードする)。
 
 ### 2. 手元のソースでコンテナを作って確認する (コンテナで動く状態の確認)
 
@@ -101,7 +101,8 @@ src/
 
 - force-simulation 表示 (ノード単位。ダブルクリックで term-point を展開)
 - **ドラッグ**: ノードをドラッグすると、周囲のノードが緩やかに追従する (stress は配置を保つ設定)。term-point は所属ノードの円周上を動かせる。マウスを乗せると、term-point はリンクの反対側の term-point (名前付き) まで、dependency 表示では support の線とその先のオブジェクトまで強調する。
-- **レイアウトエンジン**: stress (自前のストレス最小化。既定) と force (d3-force) を切り替えられる (`?layout=<engine>`)。各パネルに所要時間・リンクの交差数・ノードの重なりを表示する。設計と検討の経緯 (ELK を採用しなかった理由を含む) は playground の `docs/design_notes/netoviz2_layout.md`
+- **レイアウトエンジン**: stress (自前のストレス最小化。既定)、force (d3-force)、schematic (構成図向け) を切り替えられる (`?layout=<engine>`)。各パネルに所要時間・リンクの交差数・ノードの重なりを表示する。設計と検討の経緯 (ELK を採用しなかった理由を含む) は playground の `docs/design_notes/netoviz2_layout.md`
+- **schematic レイアウト** (`?layout=schematic`): 向き・並び・位置に意味を持たせた構成図。拠点を左右、階層を上下、冗長ペアを横並びに配置する。配置の情報は、トポロジとは別の**ダイアグラムプロファイル** (YAML。`?profile=<名前>` で `src/profiles/<名前>.yaml` を読む。正本は playground の `profiles/`、書式は `profiles/README.md`) に書く。プロファイルが無い、または合わないレイヤは、下位レイヤの配置を support をたどって引き継ぐ (物理図と論理図で拠点の左右・階層がそろう。L3 のセグメントのような接続点は機器の間に置く)、それも無ければ名前とリンクから推論する (推論した下書きは画面からダウンロードできる)。ノードやポートに重なる直線のリンクは、水平・垂直の折れ線で避ける (ノードやポートを動かすと追従する)。配置の由来と例外は、ツールバーの下のパネルに表示する。
 - **dependency (レイヤ帯) 表示** (副画面): ツールバーの「Dependency view」(`?dependency=1`) でトポロジ表示の隣に出し入れする。**トポロジ表示で選択した node / term-point だけ**について、それを支えるオブジェクト (下位レイヤ) と、それが支えるオブジェクト (上位レイヤ) の依存関係ツリーを、レイヤの帯 (上位が上) に描く。term-point を選ぶと term-point の依存、node を選ぶと node の依存 (「Term-points」をオンにすると、その node の term-point を箱の中に表示し、term-point の依存も加える)。レイヤを飛び越える support (A-B, A-C が一直線に重なる場合など) は、間のレイヤのオブジェクトの横を通る曲線で描いて重ならないようにする。**term-point は必ず所属する node の枠 (箱) の中に表示する** (どの node の term-point かが分かるように、node と分離しない。term-point だけが対象でも、その node を破線の枠で添える。term-point のない node は円)。ツリーの中のオブジェクトをクリックすると、それを選択して辿れる (選択はトポロジ表示と共有)。support 先のないオブジェクトは帯の右端ではなく上位のオブジェクトの下に置く。レイヤをまたぐ関係の設定ミスを見つけるデバッグ用途で、「Mark problems」で次を印付けして一覧する (`problems` ボタン。項目のクリックでオブジェクトを選択。対象は表示中のツリーのオブジェクト): 下位ノードに支えられていないノード (`unsupported`)・上位から使われていないノード (`unused`)・ノードの support がなく term-point の support だけがある (`tp-only`)・同じレイヤ内や上位から下位でない support (`same-layer` / `inverted`)・宣言されていないレイヤ間の support (`undeclared`)・宣言されているのに support がない (`no-support`)
 - レイヤの表示切替 (チェックボックス。「Select all / Clear all」で全選択・全解除。1 つのレイヤに着目するときは、全解除してから選ぶ)、networks flags / diff / 警告の表示
 - オブジェクトの選択 → support のトレース (上位/下位レイヤ) を強調、右パネルに属性・diff を表示

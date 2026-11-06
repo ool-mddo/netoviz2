@@ -179,6 +179,12 @@ export class ForceRenderer {
   private routeCost = 0
   private routesAt = 0
   private routeTimer: ReturnType<typeof setTimeout> | null = null
+  /** Angles of the ports of the links which go around something: toward where the route leaves the node (see updatePortHints) */
+  private portHints = new Map<string, number>()
+  /** The nodes whose ports are not turned toward the routes: it made a link which could be straight go around */
+  private hintsOff = new Set<string>()
+  /** The links with ports which a straight line is clear for between the nodes (their ports are toward the other node) */
+  private straightLinks = new Set<string>()
   private readonly onLayout: (stats: LayoutStats | null) => void
   private readonly onSchematicReport: (report: SchematicReport) => void
   private graph: DisplayGraph = { nodes: [], links: [] }
@@ -286,6 +292,7 @@ export class ForceRenderer {
     const shown = new Set(graph.nodes.map((node) => node.layer))
     this.areaIndex = new Map(layerOrder.filter((layer) => shown.has(layer)).map((layer, i) => [layer, i]))
 
+    this.routesAt = Number.NEGATIVE_INFINITY // (the routes of a new graph are made at once)
     this.buildItems(graph)
     this.simulation.nodes(this.bodies)
     this.simulation.force<ReturnType<typeof forceLink<Item, SimLink>>>('link')?.links(this.simLinks)
@@ -416,6 +423,7 @@ export class ForceRenderer {
     }
 
     this.drawLinks = graph.links.filter((link) => link.type === 'link')
+    this.hintsOff = new Set()
     this.routesFor = '' // (the links may have changed with the same nodes: the routes are made again)
     const nodeOf = (id: string) => this.itemById.get(id)?.parent ?? id
     const bundles = new Map<string, SimLink>()
@@ -565,6 +573,7 @@ export class ForceRenderer {
       }
     }
     this.appliedSignature = signature
+    this.routesAt = Number.NEGATIVE_INFINITY // (the nodes moved to the layout: the routes are made at once)
     this.placePorts()
     this.draw()
     if (!this.userMoved) this.fit()
@@ -672,7 +681,9 @@ export class ForceRenderer {
       const node = this.itemById.get(parentId)
       if (!node) continue
       const [cx, cy] = [node.x ?? 0, node.y ?? 0]
-      const desired = ports.map((port) => this.desiredAngle(node, port, center))
+      const desired = ports.map(
+        (port) => this.portHints.get(port.id) ?? this.desiredAngle(node, port, center),
+      )
       const angles = spreadAngles(desired, PORT_ARC / node.radius)
       ports.forEach((port, i) => {
         // a port moved by the user keeps its angle
@@ -899,6 +910,10 @@ export class ForceRenderer {
     if (this.engine !== 'schematic') {
       this.routes = new Map()
       this.routesFor = ''
+      if (this.portHints.size > 0) {
+        this.portHints = new Map()
+        this.placePorts()
+      }
       return
     }
     const items = [...this.bodies, ...this.ports]
@@ -917,36 +932,136 @@ export class ForceRenderer {
       return
     }
     this.routesFor = key
+    // (the ports of the links which go around something are put toward where the route leaves: this moves the ports)
+    if (this.updatePortHints()) {
+      this.routesFor = [...this.bodies, ...this.ports]
+        .map((i) => `${i.id}:${Math.round((i.x ?? 0) * 2)},${Math.round((i.y ?? 0) * 2)}`)
+        .join('|')
+    }
 
-    const obstacles: Obstacle[] = items.map((item) => ({
-      id: item.id,
-      x: item.x ?? 0,
-      y: item.y ?? 0,
-      radius: item.type === 'tp' ? PORT_RADIUS : item.radius,
-    }))
-    const endOf = (item: Item): RouteEnd | undefined => {
-      if (item.type !== 'tp') return { x: item.x ?? 0, y: item.y ?? 0, node: item.id, radius: item.radius }
-      const node = item.parent ? this.itemById.get(item.parent) : undefined
-      if (!node) return undefined
-      const angle = item.angle ?? 0
-      return {
+    const make = (): Map<string, Position[]> => {
+      const obstacles: Obstacle[] = items.map((item) => ({
+        id: item.id,
         x: item.x ?? 0,
         y: item.y ?? 0,
-        node: node.id,
-        port: item.id,
-        radius: node.radius,
-        outward: { x: Math.cos(angle), y: Math.sin(angle) },
+        radius: item.type === 'tp' ? PORT_RADIUS : item.radius,
+      }))
+      const endOf = (item: Item): RouteEnd | undefined => {
+        if (item.type !== 'tp') return { x: item.x ?? 0, y: item.y ?? 0, node: item.id, radius: item.radius }
+        const node = item.parent ? this.itemById.get(item.parent) : undefined
+        if (!node) return undefined
+        const angle = item.angle ?? 0
+        return {
+          x: item.x ?? 0,
+          y: item.y ?? 0,
+          node: node.id,
+          port: item.id,
+          radius: node.radius,
+          outward: { x: Math.cos(angle), y: Math.sin(angle) },
+        }
       }
+      const requests: RouteRequest[] = []
+      for (const link of this.drawLinks) {
+        const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
+        const [a, b] = [from && endOf(from), to && endOf(to)]
+        if (a && b) requests.push({ id: link.id, from: a, to: b })
+      }
+      return routeAround(requests, obstacles)
     }
-    const requests: RouteRequest[] = []
-    for (const link of this.drawLinks) {
-      const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
-      const [a, b] = [from && endOf(from), to && endOf(to)]
-      if (a && b) requests.push({ id: link.id, from: a, to: b })
+    let routes = make()
+    // A link which a straight line is clear for between the nodes must not go around because the ports were turned toward
+    // the routes of the other links (the ports of a small node are spread around it: they push each other): the ports of
+    // its nodes are not turned any more (they are toward the other node, as before).
+    for (let pass = 0; pass < 2; pass++) {
+      const nodes = new Set<string>()
+      for (const link of this.drawLinks) {
+        if (!routes.has(link.id) || !this.straightLinks.has(link.id)) continue
+        for (const end of [link.source, link.target]) {
+          const parent = this.itemById.get(end)?.parent
+          if (parent && this.ports.some((p) => p.parent === parent && this.portHints.has(p.id)))
+            nodes.add(parent)
+        }
+      }
+      if (nodes.size === 0) break
+      for (const node of nodes) this.hintsOff.add(node)
+      for (const port of this.ports) if (port.parent && nodes.has(port.parent)) this.portHints.delete(port.id)
+      this.placePorts()
+      routes = make()
     }
-    this.routes = routeAround(requests, obstacles)
+    this.routesFor = [...this.bodies, ...this.ports]
+      .map((i) => `${i.id}:${Math.round((i.x ?? 0) * 2)},${Math.round((i.y ?? 0) * 2)}`)
+      .join('|')
+    this.routes = routes
     this.routeCost = performance.now() - now
     this.routesAt = now
+  }
+
+  /**
+   * (schematic layout) The port of a link which goes around something is put toward where the link leaves the node, so
+   * the link does not leave the port toward the other side first. The route is made between the centers of the nodes (as
+   * if the links were between the nodes), and the direction of its first (and last) line is the direction of the port.
+   * The other ports are toward the node they are linked to, as before.
+   * @returns whether the angles of the ports are changed (the ports are moved then)
+   */
+  private updatePortHints(): boolean {
+    const nodeEnd = (item: Item): { end: RouteEnd; port?: string } | undefined => {
+      const node = item.type === 'tp' ? (item.parent ? this.itemById.get(item.parent) : undefined) : item
+      if (!node) return undefined
+      return {
+        end: { x: node.x ?? 0, y: node.y ?? 0, node: node.id, radius: node.radius },
+        ...(item.type === 'tp' ? { port: item.id } : {}),
+      }
+    }
+    const requests: Array<{ request: RouteRequest; fromPort?: string; toPort?: string }> = []
+    for (const link of this.drawLinks) {
+      const [from, to] = [this.itemById.get(link.source), this.itemById.get(link.target)]
+      if (!from || !to || (from.type !== 'tp' && to.type !== 'tp')) continue // (no ports: nothing to turn)
+      const [a, b] = [nodeEnd(from), nodeEnd(to)]
+      if (!a || !b) continue
+      requests.push({
+        request: { id: link.id, from: a.end, to: b.end },
+        ...(a.port ? { fromPort: a.port } : {}),
+        ...(b.port ? { toPort: b.port } : {}),
+      })
+    }
+    const nodes: Obstacle[] = this.bodies.map((n) => ({
+      id: n.id,
+      x: n.x ?? 0,
+      y: n.y ?? 0,
+      radius: n.radius,
+    }))
+    const routes = routeAround(
+      requests.map((r) => r.request),
+      nodes,
+    )
+    /** The angle of the first line out of the first point of the points (the axis it goes along) */
+    const angleOf = (points: readonly Position[]): number | undefined => {
+      const [start, ...rest] = points
+      const next = rest.find((p) => p.x !== start?.x || p.y !== start?.y)
+      if (!start || !next) return undefined
+      const [dx, dy] = [next.x - start.x, next.y - start.y]
+      return Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 0 : Math.PI) : dy >= 0 ? Math.PI / 2 : -Math.PI / 2
+    }
+    const hints = new Map<string, number>()
+    const off = (port: string) => this.hintsOff.has(this.itemById.get(port)?.parent ?? '')
+    this.straightLinks = new Set()
+    for (const { request, fromPort, toPort } of requests) {
+      const route = routes.get(request.id)
+      if (!route) {
+        this.straightLinks.add(request.id)
+        continue
+      }
+      const [first, last] = [angleOf(route), angleOf([...route].reverse())]
+      if (fromPort && first !== undefined && !off(fromPort)) hints.set(fromPort, first)
+      if (toPort && last !== undefined && !off(toPort)) hints.set(toPort, last)
+    }
+    const same =
+      hints.size === this.portHints.size &&
+      [...hints].every(([id, angle]) => this.portHints.get(id) === angle)
+    if (same) return false
+    this.portHints = hints
+    this.placePorts()
+    return true
   }
 
   /** Draw the current positions */

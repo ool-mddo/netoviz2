@@ -19,7 +19,7 @@ ool-mddo の汎用トポロジビューワー (Vite + Vue 3 + TypeScript の SPA
 
 - 開発サーバ: `npm run dev` (`/topologies` は api-proxy (既定 `http://localhost:15000`) へプロキシ)。コンテナ: CI が作ったイメージを playground で `docker compose pull netoviz2 && docker compose up -d netoviz2 api-proxy` → `http://localhost:15000/netoviz2/` (`v0.1.0-dev` は同じタグを上書きするので pull が必要)。
 - ヘッドレス Chrome の `--screenshot --virtual-time-budget` では force-simulation が数ティックしか動かない (`requestAnimationFrame` が進まない)。実時間で待って確認する (DevTools Protocol で操作・評価・撮影)。
-- 状態は URL で指定できる: `?layers=<layer ID,...>&sel=<object ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1`。`profile` は schematic レイアウトの図の定義 (`src/profiles/<名前>.yaml`。試行段階の作業用コピーで、正本は playground の `profiles/`)。省略すると、下位レイヤからの継承 (`inherit.ts`)、名前とリンクからの推論 (`infer.ts`) の順に試す。
+- 状態は URL で指定できる: `?layers=<layer ID,...>&sel=<object ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1`。`profile` は schematic レイアウトの図の定義 (`src/profiles/<名前>.yaml`。試行段階の作業用コピーで、正本は playground の `profiles/`)。省略すると、下位レイヤからの継承 (`inherit.ts`)、名前とリンクからの推論 (`infer.ts`) の順に試す。リンクの経路は、描画のたびに現在の位置から求める (`src/render/linkRouter.ts`。schematic のみ)。プロファイルの書式は playground の `profiles/README.md`。
 
 ## コマンド
 

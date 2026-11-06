@@ -58,8 +58,11 @@ const DEFAULTS = {
   cornerCost: 30,
 }
 
-/** A route may touch the margin of the node of a port which the link leaves, but it must not go into the circle */
-const INSIDE = -1
+/**
+ * A route may touch the margin of the node of a port which the link leaves, and may go a little into the circle (the
+ * circle is drawn over the link: a line which only clips the edge of it is not seen), but it must not cross it
+ */
+const INSIDE = -3
 
 /** Distance from the point to the segment */
 function distanceToSegment(p: Position, a: Position, b: Position): number {

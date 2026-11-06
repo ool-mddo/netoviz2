@@ -726,6 +726,145 @@ describe('ForceRenderer', () => {
           expect(d()).not.toBe(stale) // the route was made again from the new positions
         })
 
+        describe('the ports of the links which go around something', () => {
+          const expandedRow = (withBlocker: boolean): DisplayGraph => {
+            const withPorts = (id: string, ports: string[]) => [
+              node(id, true),
+              ...ports.map((name) => ({
+                id: `l1/${id}/${name}`,
+                type: 'tp' as const,
+                name,
+                layer: 'l1',
+                parent: `l1/${id}`,
+              })),
+            ]
+            return {
+              nodes: [
+                ...withPorts('a', ['p']),
+                ...(withBlocker ? withPorts('m', ['x', 'y']) : []),
+                ...withPorts('b', ['q']),
+              ],
+              links: [{ id: 'l', source: 'l1/a/p', target: 'l1/b/q', type: 'link', count: 1 }],
+            }
+          }
+          /** The port relative to the center of the node, and the radius of the node */
+          const relative = (port: string, node: string) => {
+            const [p, n] = [pos(port), pos(node)]
+            return {
+              dx: p[0] - n[0],
+              dy: p[1] - n[1],
+              r: Number(nodeEl(node).querySelector('circle')?.getAttribute('r')),
+            }
+          }
+
+          it('is put toward where the route leaves the node (here: over the row), not toward the other node', async () => {
+            makeRow(expandedRow(true))
+            await flush()
+            for (const [port, node] of [
+              ['l1/a/p', 'l1/a'],
+              ['l1/b/q', 'l1/b'],
+            ] as const) {
+              const { dx, dy, r } = relative(port, node)
+              expect(dy).toBeLessThan(-0.9 * r) // at the top of the circle
+              expect(Math.abs(dx)).toBeLessThan(1)
+            }
+            // and the link leaves it straight up
+            const [start, first] = points(d())
+            expect(first![0]).toBeCloseTo(start![0], 6)
+            expect(first![1]).toBeLessThan(start![1])
+          })
+
+          it('is toward the other node when the link is straight', async () => {
+            makeRow(expandedRow(false))
+            await flush()
+            expect(d()).not.toContain('Q')
+            const a = relative('l1/a/p', 'l1/a')
+            expect(a.dx).toBeGreaterThan(0.9 * a.r) // at the right of a (toward b)
+            const b = relative('l1/b/q', 'l1/b')
+            expect(b.dx).toBeLessThan(-0.9 * b.r)
+          })
+
+          it('is toward the other node again when the node in the way is moved away', async () => {
+            makeRow(expandedRow(true))
+            await flush()
+            const [mx, my] = pos('l1/m')
+            move('l1/m', mx, my + 300)
+            expect(d()).not.toContain('Q')
+            const a = relative('l1/a/p', 'l1/a')
+            expect(a.dx).toBeGreaterThan(0.9 * a.r)
+          })
+        })
+
+        it('makes the routes at once when the nodes are arranged (they are not delayed because the last making was heavy)', async () => {
+          renderer.destroy()
+          renderer = new ForceRenderer(svg, callbacks, {
+            multiStart: 1,
+            engine: 'schematic',
+            schematicLayout: (input) =>
+              Promise.resolve(new Map(input.nodes.map((n, i) => [n.id, { x: i * 150, y: 50 }])) as Positions),
+          })
+          // as if the last making took long and was just now
+          const internals = renderer as unknown as { routeCost: number; routesAt: number }
+          internals.routeCost = 1000
+          internals.routesAt = performance.now()
+          renderer.setGraph(row, ['l1'])
+          await flush()
+          expect(d()).toContain('Q')
+        })
+
+        it('keeps a straight link straight when the ports of the node are turned toward the route of another link', async () => {
+          // a, b: expanded, in a row with the node m between (the link a - b goes around m: the ports are turned over the
+          // row). The node a has another link to the node u under it, which is straight: it must stay straight.
+          // (If the turned ports made it go around, the ports of the nodes would not be turned: see updateRoutes.)
+          const port = (id: string, name: string) => ({
+            id: `l1/${id}/${name}`,
+            type: 'tp' as const,
+            name,
+            layer: 'l1',
+            parent: `l1/${id}`,
+          })
+          const graph: DisplayGraph = {
+            nodes: [
+              node('a', true),
+              port('a', 'p'),
+              port('a', 'r'),
+              node('m'),
+              node('b', true),
+              port('b', 'q'),
+              node('u'),
+            ],
+            links: [
+              { id: 'around', source: 'l1/a/p', target: 'l1/b/q', type: 'link', count: 1 },
+              { id: 'down', source: 'l1/a/r', target: 'l1/u', type: 'link', count: 1 },
+            ],
+          }
+          renderer.destroy()
+          renderer = new ForceRenderer(svg, callbacks, {
+            multiStart: 1,
+            engine: 'schematic',
+            // a, m, b in a row; u under a
+            schematicLayout: (input) => {
+              const at: Record<string, [number, number]> = {
+                'l1/a': [0, 50],
+                'l1/m': [150, 50],
+                'l1/b': [300, 50],
+                'l1/u': [0, 160],
+              }
+              return Promise.resolve(
+                new Map(input.nodes.map((n) => [n.id, { x: at[n.id]![0], y: at[n.id]![1] }])) as Positions,
+              )
+            },
+          })
+          renderer.setGraph(graph, ['l1'])
+          await flush()
+          const pathOf = (id: string) =>
+            [...svg.querySelectorAll('path.link')]
+              .find((p) => (p as unknown as { __data__: { id: string } }).__data__.id === id)
+              ?.getAttribute('d') ?? ''
+          expect(pathOf('around')).toContain('Q')
+          expect(pathOf('down')).not.toContain('Q') // straight
+        })
+
         it('draws the links straight in the other engines', async () => {
           make(lineLayout()).setGraph(collapsed, ['l1', 'l2'])
           await flush()
