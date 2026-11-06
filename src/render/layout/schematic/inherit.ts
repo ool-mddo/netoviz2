@@ -67,6 +67,8 @@ export function lowerNodesIn(
 export interface BaseArrangement {
   annotations: ReadonlyMap<string, NodeAnnotation>
   positions: Positions
+  /** Nodes of the base layer which are connection points (not devices): the nodes they support are connection points */
+  connectors?: ReadonlySet<string>
 }
 
 export interface Inherited {
@@ -110,6 +112,12 @@ export function inheritAnnotations(
   }
 
   for (const node of nodes) {
+    // a node supported only by connection points of the base layer (e.g. an L3 segment) is a connection point as well
+    const lowers = lowerOf.get(node.id) ?? []
+    if (lowers.length > 0 && base.connectors && lowers.every((id) => base.connectors?.has(id))) {
+      connectors.push(node)
+      continue
+    }
     const supporters = [...new Set(lowerOf.get(node.id) ?? [])].filter(
       (id) => base.annotations.get(id)?.tierIndex !== undefined,
     )

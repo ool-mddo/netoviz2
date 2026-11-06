@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { Position } from '../types'
 import { layoutQuality } from '../quality'
 import { mddoFwLayer1 } from '../../../test/mddoFwLayer1'
 import { mddoMregnwLayer1, mddoBgpLayer1, mddoNetworkLayer1 } from '../../../test/sampleLayers'
@@ -497,5 +498,56 @@ rules:
     })
     expect(reports[0]!.source).toBe('inferred')
     expect(reports[0]!.violations.map((v) => v.id)).toContain('layer1/odd')
+  })
+})
+
+describe('layoutSchematic inheriting from a layer arranged by its profile (no layer below it)', () => {
+  const YAML = `
+view: v
+target: { layer: base }
+tiers: [up, down]
+name: '^(?<role>[a-z]+)-\\d+$'
+rules:
+  - { select: "[role=r]", tier: up }
+  - { select: "[role=h]", tier: down }
+`
+  const sn = (layer: string, name: string) => ({ id: `${layer}/${name}`, name, radius: 11 })
+  const names = ['r-1', 'h-1', 'seg', 'r-2', 'h-2', 'seg2']
+  const baseNodes = names.map((n) => sn('base', n))
+  // segments join two devices each (a connection point, not a device without a tier)
+  const link = (layer: string, a: string, b: string) => ({ source: `${layer}/${a}`, target: `${layer}/${b}` })
+  const baseLinks = [
+    link('base', 'r-1', 'seg'),
+    link('base', 'seg', 'h-1'),
+    link('base', 'r-2', 'seg2'),
+    link('base', 'seg2', 'h-2'),
+  ]
+  const upNodes = names.map((n) => sn('up', n))
+  const upLinks = baseLinks.map((l) => ({
+    source: l.source.replace('base', 'up'),
+    target: l.target.replace('base', 'up'),
+  }))
+
+  it('makes the nodes supported only by connection points of the base connection points', async () => {
+    const lowerOf = new Map(names.map((n) => [`up/${n}`, [`base/${n}`]]))
+    const reports: SchematicReport[] = []
+    const profile = parseProfiles(YAML).profiles[0]!
+    const positions = await layoutSchematic({
+      layer: 'up',
+      nodes: upNodes,
+      links: upLinks,
+      bases: [{ layer: 'base', nodes: baseNodes, links: baseLinks, lowerOf, profile }],
+      report: (r) => reports.push(r),
+    })
+    expect(reports[0]).toMatchObject({ source: 'inherited', base: 'base' })
+    expect(reports[0]!.violations).toEqual([])
+    // the segment is between the devices it joins
+    const [r1, h1, seg] = ['r-1', 'h-1', 'seg'].map((n) => positions.get(`up/${n}`)!) as [
+      Position,
+      Position,
+      Position,
+    ]
+    expect(seg.y).toBeGreaterThan(r1.y)
+    expect(seg.y).toBeLessThan(h1.y)
   })
 })

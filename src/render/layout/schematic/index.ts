@@ -117,7 +117,7 @@ function arrangeByProfile(
   links: readonly Link[],
   profile: DiagramProfile,
   withConnectionPoints = false,
-): Pick<Arranged, 'positions' | 'annotated'> | undefined {
+): (Pick<Arranged, 'positions' | 'annotated'> & { connectors: ReadonlySet<string> }) | undefined {
   const annotated = annotate(nodes, profile)
   if (annotated.unclassified.length >= nodes.length) return undefined
   const unclassified = new Set(annotated.unclassified)
@@ -142,10 +142,12 @@ function arrangeByProfile(
   return {
     annotated: { ...annotated, unclassified: annotated.unclassified.filter((id) => !connectorIds.has(id)) },
     positions,
+    connectors: connectorIds,
   }
 }
 
-type BaseArrangement = Pick<Arranged, 'positions' | 'annotated'> | undefined
+type BaseArrangement =
+  (Pick<Arranged, 'positions' | 'annotated'> & { connectors?: ReadonlySet<string> }) | undefined
 /** Arrangements of the base layers (the array of the nodes of a base layer is not changed until it is loaded again) */
 const baseCache = new WeakMap<
   object,
@@ -160,7 +162,9 @@ function arrangeBase(base: SchematicBase): BaseArrangement {
   const cached = baseCache.get(base.nodes)
   if (cached && cached.links === base.links && cached.profile === base.profile) return cached.arranged
   const profile = base.profile ?? inferProfile(base.nodes, base.links)?.profile
-  const arranged = profile && arrangeByProfile(base.nodes, base.links, profile)
+  // With a given profile, the nodes it leaves without a tier but which join devices (e.g. L3 segments) are connection
+  // points, as when the layer is arranged by the profile itself: the layers above inherit that (see inheritAnnotations).
+  const arranged = profile && arrangeByProfile(base.nodes, base.links, profile, base.profile !== undefined)
   baseCache.set(base.nodes, {
     links: base.links,
     ...(base.profile ? { profile: base.profile } : {}),
@@ -188,6 +192,7 @@ function arrangeByInheritance(
   const { annotated, devices, connectors, hints, unclassifiedRow } = inheritAnnotations(nodes, base.lowerOf, {
     annotations: arranged.annotated.annotations,
     positions: arranged.positions,
+    ...(arranged.connectors ? { connectors: arranged.connectors } : {}),
   })
   // the base layer does not fit this layer: it classifies few devices (or all the nodes are connection points)
   if (devices.length === 0 || annotated.unclassified.length * 2 > devices.length) return undefined
