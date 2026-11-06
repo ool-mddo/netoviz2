@@ -1,122 +1,78 @@
 # netoviz2
 
-ool-mddo のマルチレイヤ・ネットワークトポロジ用ビューワー (フロントエンドのみ)。
-データの読み込み・加工は netomox-exp の `/topologies/:network/:snapshot/netoviz2/*` API が行い、netoviz2 は REST API 経由でデータを取得して描画・操作に専念する (ローカルファイルは持たない)。
+[ool-mddo](https://github.com/ool-mddo) の**マルチレイヤのネットワークトポロジ用ビューワー**です。ブラウザで動く SPA (フロントエンドのみ) で、
+ネットワーク機器の物理接続 (L1)、L2、L3、ルーティングプロトコルなど、**レイヤを重ねたトポロジ**を表示し、レイヤ間の依存関係 (support) をたどれます。
 
-- データ形式・API 仕様: playground の `docs/netoviz2_data_format.md`
-- 計画: playground の `docs/work/plans/netoviz2_requirements.md`
+- ユースケースに依存しない汎用のビューワーです (ネットワーク名・レイヤの種類・属性の中身に応じた特別な処理を持たない)。
+- データの加工は持ちません。トポロジの読み込みと整形は、netomox-exp の API (`/topologies/:network/:snapshot/netoviz2/*`) が行い、netoviz2 は REST API で取得して描画・操作に専念します。
 
-## 開発
+## 主な機能
 
-Node.js 24 以上。
+- **トポロジの表示:** レイヤごとにノード・リンク・term-point (ポート) を表示します。ダブルクリックで term-point を展開できます。
+- **レイヤの切替:** 表示するレイヤをチェックボックスで選びます。
+- **support のトレース:** オブジェクトを選ぶと、それを支える下位レイヤのオブジェクトと、それが支える上位レイヤのオブジェクトを強調し、属性・差分を右のパネルに表示します。
+- **dependency 表示:** 選んだ node / term-point の依存関係を、レイヤの帯 (上位が上) に描いた副画面で見られます。
+- **3 つのレイアウト:**
+  - **stress** (既定): ストレス最小化。リンクの交差が少なく、コンパクトです。
+  - **force**: d3-force による力学配置です。
+  - **schematic**: 実務の構成図に近い配置です。拠点を左右、階層 (外部接続 → FW → コア → ...) を上下、冗長ペアを横並びに置きます。
+    配置の情報は、トポロジとは別の YAML (ダイアグラムプロファイル) に書けます。無いときは、下位レイヤの配置の引き継ぎや、名前とリンクからの推論で作ります (下書きは画面から取り出せます)。
+    ノードや term-point に重なるリンクは、水平・垂直の折れ線で避けます。
+- **ドラッグ:** ノードをドラッグすると、周囲が追従します。term-point は、所属ノードの円周上を動かせます。
+- **差分と警告:** snapshot 間の差分 (diff) と、トポロジの警告を表示します。
+- **自動更新:** 5 秒ごとに更新を確認し、トポロジが更新されたら自動で再読み込みします。
+- **テーマ:** ライト / ダークを、ヘッダー右の「Auto / Light / Dark」で切り替えます。
 
-```bash
-npm install
-npm run dev          # http://localhost:5173/netoviz2/ (API は NETOVIZ2_API_URL (既定 http://localhost:15000) へプロキシ)
-npm run typecheck
-npm test
-npm run lint
-npm run build        # dist/ (静的ファイル。/netoviz2/ 配下で配信する)
-```
+## 使い方
 
-## 手動での動作確認
+### 起動する
 
-ソースを直しながら画面で確認する方法は 3 つある。**コンテナ (nginx の静的配信) は、ソースを mount しておらず、修正を自動では反映しない** (netoviz のようなホットリロードはない)。修正中は 1 の開発サーバを使う。
-
-前提: playground が起動していて (`docker compose up -d`)、確認したいトポロジが netomox-exp にあること。表示するデータ (API) はいずれも、api-proxy (`http://localhost:15000`) 経由で netomox-exp から取る。
-
-### 1. 開発サーバ (修正中の確認。保存すると自動でブラウザが更新される)
-
-```bash
-cd repos/netoviz2
-npm install                      # 初回のみ
-npm run dev                      # → http://localhost:5173/netoviz2/ (ポートが使用中なら別のポート。起動時の表示を見る)
-# api-proxy が別のホスト/ポートのときは、API の転送先を指定する
-NETOVIZ2_API_URL=http://<host>:15000 npm run dev
-```
-
-- ソースの保存で、ブラウザが自動で更新される (HMR)。API は同じオリジンの `/topologies/...` として、開発サーバから `NETOVIZ2_API_URL` へ転送される。
-- 表示の例 (`<network>` / `<snapshot>` は `http://localhost:15000/topologies/index` で確認できる):
-  - 一覧: `http://localhost:5173/netoviz2/`
-  - トポロジ: `http://localhost:5173/netoviz2/<network>/<snapshot>`
-  - 状態は URL で指定できる: `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1` (ID は URL エンコードする)。
-
-### 2. 手元のソースでコンテナを作って確認する (コンテナで動く状態の確認)
-
-```bash
-# リポジトリのルートで、CI と同じタグでイメージを作る (.env の NETOVIZ2_IMAGE_TAG と同じタグ)
-docker build -t ghcr.io/ool-mddo/netoviz2:v0.1.0-dev repos/netoviz2
-# playground のディレクトリで、pull せずに作り直す (pull すると CI のイメージで上書きされる)
-docker compose up -d --force-recreate netoviz2 api-proxy
-# → http://localhost:15000/netoviz2/
-```
-
-- 修正のたびに `docker build` からやり直す (自動では反映されない)。ブラウザに古い JS が残るときは強制再読み込み (Ctrl+Shift+R)。
-- 元に戻す (CI のイメージを使う) ときは `docker compose pull netoviz2 && docker compose up -d netoviz2`。
-
-### 3. CI が作ったイメージで確認する
-
-push すると CI が `ghcr.io/ool-mddo/netoviz2:<ブランチ名>` を作る。`.env` の `NETOVIZ2_IMAGE_TAG` をそのブランチ名にして、`docker compose pull netoviz2 && docker compose up -d netoviz2`。同じタグの間は上書きされるので、更新後は pull が必要。
-
-### 画面を自動で確認するとき
-
-ヘッドレス Chrome の `--screenshot --virtual-time-budget` では `requestAnimationFrame` が進まず、レイアウト (force-simulation) が数ティックしか動かない。実時間で待つこと (DevTools Protocol でページを開き、待って、評価し、撮影する)。
-
-## URL
-
-- `/netoviz2/` : network / snapshot 一覧
-- `/netoviz2/:network/:snapshot` : トポロジの表示
-
-## コンテナ
-
-`Dockerfile` は、ビルドした静的ファイルを nginx で `/netoviz2/` 配下に配信するイメージを作る (ランタイムの Node は含まない。volume も持たない)。
-playground の `docker-compose.yaml` の `netoviz2` サービスとして起動し、api-proxy (nginx) の `/netoviz2/` から転送される。イメージは CI が作る (`ghcr.io/ool-mddo/netoviz2:<ブランチ名>`)。
+netoviz2 は、[playground](https://github.com/ool-mddo/playground) の一部として起動します (netomox-exp と api-proxy が必要です)。
 
 ```bash
 # playground のディレクトリで
-docker compose pull netoviz2        # CI が作ったイメージ (.env の NETOVIZ2_IMAGE_TAG)
-docker compose up -d netoviz2 api-proxy
-# http://localhost:15000/netoviz2/
-# 手元のソースでイメージを作って試すときは、docker build -t ghcr.io/ool-mddo/netoviz2:<タグ> repos/netoviz2
+docker compose up -d
+# → http://localhost:15000/netoviz2/
 ```
 
-## 構成
+開発サーバで起動する方法は、[docs/development.md](docs/development.md) を参照してください。
+
+### 画面の操作
+
+1. `/netoviz2/` で network を選び、snapshot を選びます。
+2. 左のチェックボックスで、表示するレイヤを選びます (レイヤが多いときは、最上位のレイヤだけが表示されます)。
+3. ノードや term-point をクリックすると、support のトレースと属性が表示されます。ダブルクリックで term-point を展開します。
+4. ツールバーで、レイアウトの切替、Trace の方向、Dependency view の表示を切り替えます。
+
+### URL で状態を指定する
+
+表示の状態は、URL のクエリで指定でき、リンクで共有できます (ID は URL エンコードします)。
 
 ```
-src/
-  api/          netomox-exp の netoviz2 API の型とクライアント (ETag 対応)
-  domain/       Viewer に依存しない純粋なロジック (support 索引・トレース・support のチェック、リンクの束ね、グラフ構築、diff data)
-  stores/       Pinia: topology (summary・レイヤ・supports・属性、ETag による更新)、selection (選択とトレース)、view (展開状態)
-  composables/  選択処理 (useSelect)、ポーリング (usePolling)
-  render/       描画 (ForceRenderer: d3-force + SVG。Vue のリアクティブ機構を通さず DOM を直接更新)
-  components/   ForceView (トポロジ), DependencyView (選択したオブジェクトの依存ツリー), AttributePanel, JsonTree, LayerList, SummaryBar, ViewToolbar
-  views/        HomeView (一覧), TopologyView (表示)
+/netoviz2/<network>/<snapshot>?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1
 ```
 
-## URL のクエリ
+| クエリ       | 内容                                                |
+| ------------ | --------------------------------------------------- |
+| `layers`     | 表示するレイヤ                                      |
+| `sel`        | 選択するオブジェクト                                |
+| `layout`     | レイアウト: `stress` (既定) / `force` / `schematic` |
+| `profile`    | schematic のプロファイルの名前                      |
+| `dependency` | `1` で依存関係の副画面を表示                        |
 
-`/netoviz2/:network/:snapshot?layers=<id,id>&sel=<object id>` : 表示するレイヤと選択中のオブジェクト (リンクで共有できる)。
+### schematic レイアウト
 
-## 機能 (MVP)
+`?layout=schematic` を付けるだけで、プロファイルが無くても構成図風に配置されます (プロファイルは、`profiles/` に置いたものが、対象の network・snapshot・レイヤに合えば自動で使われます)。画面の下に、配置の由来 (プロファイル / 継承 / 推論) と、例外 (階層が付かないノードなど) が表示され、
+推論した結果を YAML の下書きとして保存できます。プロファイルを書くときは、[docs/design/profile_format.md](docs/design/profile_format.md) を参照してください。
 
-- force-simulation 表示 (ノード単位。ダブルクリックで term-point を展開)
-- **ドラッグ**: ノードをドラッグすると、周囲のノードが緩やかに追従する (stress は配置を保つ設定)。term-point は所属ノードの円周上を動かせる。マウスを乗せると、term-point はリンクの反対側の term-point (名前付き) まで、dependency 表示では support の線とその先のオブジェクトまで強調する。
-- **レイアウトエンジン**: stress (自前のストレス最小化。既定)、force (d3-force)、schematic (構成図向け) を切り替えられる (`?layout=<engine>`)。各パネルに所要時間・リンクの交差数・ノードの重なりを表示する。設計と検討の経緯 (ELK を採用しなかった理由を含む) は playground の `docs/design_notes/netoviz2_layout.md`
-- **schematic レイアウト** (`?layout=schematic`): 向き・並び・位置に意味を持たせた構成図。拠点を左右、階層を上下、冗長ペアを横並びに配置する。配置の情報は、トポロジとは別の**ダイアグラムプロファイル** (YAML。`?profile=<名前>` で `src/profiles/<名前>.yaml` を読む。正本は playground の `profiles/`、書式は `profiles/README.md`) に書く。プロファイルが無い、または合わないレイヤは、下位レイヤの配置を support をたどって引き継ぐ (物理図と論理図で拠点の左右・階層がそろう。L3 のセグメントのような接続点は機器の間に置く)、それも無ければ名前とリンクから推論する (推論した下書きは画面からダウンロードできる)。ノードやポートに重なる直線のリンクは、水平・垂直の折れ線で避ける (ノードやポートを動かすと追従する)。配置の由来と例外は、ツールバーの下のパネルに表示する。
-- **dependency (レイヤ帯) 表示** (副画面): ツールバーの「Dependency view」(`?dependency=1`) でトポロジ表示の隣に出し入れする。**トポロジ表示で選択した node / term-point だけ**について、それを支えるオブジェクト (下位レイヤ) と、それが支えるオブジェクト (上位レイヤ) の依存関係ツリーを、レイヤの帯 (上位が上) に描く。term-point を選ぶと term-point の依存、node を選ぶと node の依存 (「Term-points」をオンにすると、その node の term-point を箱の中に表示し、term-point の依存も加える)。レイヤを飛び越える support (A-B, A-C が一直線に重なる場合など) は、間のレイヤのオブジェクトの横を通る曲線で描いて重ならないようにする。**term-point は必ず所属する node の枠 (箱) の中に表示する** (どの node の term-point かが分かるように、node と分離しない。term-point だけが対象でも、その node を破線の枠で添える。term-point のない node は円)。ツリーの中のオブジェクトをクリックすると、それを選択して辿れる (選択はトポロジ表示と共有)。support 先のないオブジェクトは帯の右端ではなく上位のオブジェクトの下に置く。レイヤをまたぐ関係の設定ミスを見つけるデバッグ用途で、「Mark problems」で次を印付けして一覧する (`problems` ボタン。項目のクリックでオブジェクトを選択。対象は表示中のツリーのオブジェクト): 下位ノードに支えられていないノード (`unsupported`)・上位から使われていないノード (`unused`)・ノードの support がなく term-point の support だけがある (`tp-only`)・同じレイヤ内や上位から下位でない support (`same-layer` / `inverted`)・宣言されていないレイヤ間の support (`undeclared`)・宣言されているのに support がない (`no-support`)
-- レイヤの表示切替 (チェックボックス。「Select all / Clear all」で全選択・全解除。1 つのレイヤに着目するときは、全解除してから選ぶ)、networks flags / diff / 警告の表示
-- オブジェクトの選択 → support のトレース (上位/下位レイヤ) を強調、右パネルに属性・diff を表示
-- 5 秒ごとに ETag を確認し、トポロジが更新されたら自動で再読込
+## ドキュメント
 
-## CI (GitHub Actions)
+構成・開発手順・設計は、[docs/](docs/README.md) にあります。
 
-push で、lint・型検査・テストを実行し、成功したらコンテナイメージ (`ghcr.io/ool-mddo/netoviz2:<ブランチ名>`) を作成する。古い (タグの無い) イメージは、直近 10 件を残して削除する。
-**イメージのタグはブランチ名なので、ブランチ名にスラッシュを入れない** (例: `v0.1.0-dev`)。
+- [構成・アーキテクチャ](docs/architecture.md)
+- [開発手順](docs/development.md)
+- [レイアウトの設計](docs/design/layout.md)、[schematic レイアウトの設計](docs/design/schematic_layout.md)、[プロファイルの書式](docs/design/profile_format.md)
 
 ## ライセンス
 
 MIT ([LICENSE](LICENSE))。
-
-## テーマ
-
-ライト / ダークは、ヘッダー右の「Auto / Light / Dark」で切り替える (Auto はブラウザ・OS の設定に従う。選択はブラウザに保存する)。色は `src/styles/theme.css` の変数で一元管理している (`color-scheme` と `light-dark()`)。
