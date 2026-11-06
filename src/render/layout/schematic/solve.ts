@@ -20,7 +20,7 @@ export interface SolveOptions {
   initialX?: ReadonlyMap<string, number>
 }
 
-const DEFAULTS = { nodeGap: 40, pairGap: 40, groupGap: 120, rowGap: 90, iterations: 40 }
+const DEFAULTS = { nodeGap: 60, pairGap: 60, groupGap: 160, rowGap: 120, iterations: 40 }
 /** Part of the distance to the wanted position which is moved in an iteration */
 const STEP = 0.6
 

@@ -528,8 +528,8 @@ describe('ForceRenderer', () => {
         })
 
         it('moves only the node, rounded to the grid, without the simulation', async () => {
-          const { before, after } = await drag({}, 14, 6)
-          expect(after.a).toEqual([before.a[0] + 10, before.a[1] + 10])
+          const { before, after } = await drag({}, 24, 12)
+          expect(after.a).toEqual([before.a[0] + 20, before.a[1] + 20])
           expect(after.b).toEqual(before.b)
         })
 

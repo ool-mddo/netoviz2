@@ -65,7 +65,7 @@ const request = (over: Partial<MoveRequest>): MoveRequest => ({
 
 describe('snapDelta', () => {
   it('rounds the movement to the grid', () => {
-    expect(snapDelta(at(14, -26), 10)).toEqual(at(10, -30))
+    expect(snapDelta(at(14, -26), 20)).toEqual(at(20, -20))
     expect(snapDelta(at(14, -26), 0)).toEqual(at(14, -26))
   })
 })

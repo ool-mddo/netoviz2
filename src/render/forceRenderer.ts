@@ -65,7 +65,7 @@ export function layerColor(layer: string, layerOrder: readonly string[]): string
  */
 const DRAG_ALPHA = 0.1
 /** (schematic layout) the movement of a dragged node is rounded to this grid (the movement, so the rows stay aligned) */
-const SCHEMATIC_GRID = 10
+const SCHEMATIC_GRID = 20
 const DRAG_ANCHOR_STRENGTH = 0.12
 const DRAG_CHARGE_SCALE = 0.3
 const DRAG_VELOCITY_DECAY = 0.6

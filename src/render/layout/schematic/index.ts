@@ -178,7 +178,7 @@ function arrangeBase(base: SchematicBase): BaseArrangement {
 }
 
 /** Gap between the devices in a row (a connection point is put between them) */
-const DEVICE_GAP = 70
+const DEVICE_GAP = 100
 
 /**
  * The layer inherits the arrangement of the base layer (through the supports): the devices (the nodes supported by one

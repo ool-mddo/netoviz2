@@ -414,7 +414,7 @@ rules:
       ...input.nodes.filter((n) => !n.name.startsWith('Seg_')).map((n) => positions.get(n.id)!.y),
     )
     const top = Math.min(...input.nodes.map((n) => positions.get(n.id)!.y))
-    expect(deviceTop - top).toBeLessThan(200) // it was 576 when no link might pass through a node
+    expect(deviceTop - top).toBeLessThan(300) // it was 576 when no link might pass through a node
   })
 
   it('keeps the nodes apart, with far fewer crossings than the segments in a row at the bottom', async () => {
