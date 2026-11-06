@@ -4,6 +4,7 @@ import { annotate, type Annotated } from './annotate'
 import { inferProfile } from './infer'
 import { placeConnectors } from './connectors'
 import { inheritAnnotations } from './inherit'
+import { routeLinks } from './routes'
 import { solvePositions } from './solve'
 import { assignSlots } from './slots'
 import type {
@@ -186,6 +187,7 @@ export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> 
   for (const attempt of attempts) {
     const arranged = attempt()
     if (!arranged) continue
+    input.routes?.(routeLinks(nodes, links, arranged.positions))
     report?.({
       layer,
       source: arranged.source,
@@ -196,6 +198,7 @@ export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> 
     return Promise.resolve(arranged.positions)
   }
 
+  input.routes?.(new Map())
   report?.({ layer, source: 'none', violations: [] })
   return Promise.resolve(
     layoutWithStress(

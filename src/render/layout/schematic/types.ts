@@ -1,4 +1,4 @@
-import type { Positions } from '../types'
+import type { Position, Positions } from '../types'
 
 /** Selector of a rule: all the parts must match (a part is `#id` or `[key=value]`; `*` is empty = matches all) */
 export interface Selector {
@@ -94,6 +94,11 @@ export interface SchematicLayerInput {
   profile?: DiagramProfile
   /** Lower layers to inherit the arrangement from, in the order to try (the lowest layer first) */
   bases?: readonly SchematicBase[]
+  /**
+   * Called with the routes of the links which a straight line would pass through a node (empty if none), for each
+   * layout. The key is the pair of the nodes of the link (see routeKey); the points are the waypoints, not the ends.
+   */
+  routes?: (routes: ReadonlyMap<string, Position[]>) => void
   /** Called with what the layout was made from and the exceptions */
   report?: (report: SchematicReport) => void
 }

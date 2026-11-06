@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import type { DisplayGraph } from '../domain/graph'
 import { ForceRenderer, type Highlight } from './forceRenderer'
 import { parseProfiles } from './layout/schematic/profile'
+import { routeKey } from './layout/schematic/routes'
 import type { SchematicLayerFn } from './layout/schematic/types'
 import type { LayerLayoutFn, LayoutStats, Positions } from './layout/types'
 
@@ -577,6 +578,93 @@ describe('ForceRenderer', () => {
         renderer.setGraph(collapsed, ['l1', 'l2'])
         await flush()
         expect(layout).toHaveBeenCalledTimes(4)
+      })
+
+      describe('routes of the links', () => {
+        const withRoute = () => {
+          renderer.destroy()
+          renderer = new ForceRenderer(svg, callbacks, {
+            multiStart: 1,
+            engine: 'schematic',
+            schematicLayout: (input) => {
+              // l1/a - l1/b goes over the row: up 30 from the nodes (the route is from the node of the smaller ID)
+              input.routes?.(
+                input.layer === 'l1'
+                  ? new Map([
+                      [
+                        routeKey('l1/a', 'l1/b'),
+                        [
+                          { x: 0, y: 20 },
+                          { x: 0, y: -30 },
+                          { x: 100, y: -30 },
+                          { x: 100, y: 20 },
+                        ],
+                      ],
+                    ])
+                  : new Map(),
+              )
+              return Promise.resolve(
+                new Map(input.nodes.map((n, i) => [n.id, { x: i * 100, y: 50 }])) as Positions,
+              )
+            },
+          })
+          return renderer
+        }
+        const d = () => svg.querySelector('path.link')?.getAttribute('d') ?? ''
+
+        it('draws the link of a route as a polyline with rounded corners through the waypoints', async () => {
+          withRoute().setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          const [ax, ay] = pos('l1/a')
+          // from the center of l1/a, through the waypoints (moved with the layer), to the center of l1/b
+          expect(d()).toMatch(/^M[\d.e+-]+,[\d.e+-]+ L/)
+          expect(d()).toContain('Q')
+          expect(d().startsWith(`M${ax},${ay} `)).toBe(true)
+          const lane = ay - 80 // the lane is 30 over the row, the waypoints are 50 over the nodes (y 50 -> -30 = 80 up)
+          expect(d()).toContain(`${ax},${lane + 6}`) // the corner is cut 6 before the waypoint (0, -30 from the layer)
+        })
+
+        it('draws the same route for the link in the reverse direction', async () => {
+          const r = withRoute()
+          r.setGraph(
+            {
+              nodes: collapsed.nodes,
+              links: collapsed.links.map((l) => ({ ...l, source: l.target, target: l.source })),
+            },
+            ['l1', 'l2'],
+          )
+          await flush()
+          const [bx, by] = pos('l1/b')
+          expect(d().startsWith(`M${bx},${by} `)).toBe(true)
+          expect(d()).toContain('Q')
+        })
+
+        it('keeps the routes when the same graph is set again (it is not arranged again)', async () => {
+          const r = withRoute()
+          r.setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          expect(d()).toContain('Q')
+          r.setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          expect(d()).toContain('Q')
+        })
+
+        it('uses the routes of the new layout when the graph is arranged again (engine change and back)', async () => {
+          const r = withRoute()
+          r.setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          r.setEngine('force')
+          expect(d()).not.toContain('Q')
+          r.setEngine('schematic')
+          await flush()
+          expect(d()).toContain('Q')
+        })
+
+        it('draws the links straight in the other engines', async () => {
+          make(lineLayout()).setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          expect(d()).not.toContain('Q')
+        })
       })
 
       it('tells the report of each layer, but not the one which comes after a newer layout is started', async () => {
