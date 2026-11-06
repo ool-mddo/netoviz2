@@ -12,9 +12,14 @@ export interface PlaceOptions {
   step?: number
   /** How many steps it is moved at most */
   maxSteps?: number
+  /**
+   * Cost of a link to a device which passes through another node (the link router can go around it), in the unit of a
+   * step of moving. A connection point on a node or on a link is much worse (it cannot be fixed afterwards).
+   */
+  legCost?: number
 }
 
-const DEFAULTS = { margin: 10, step: 24, maxSteps: 40 }
+const DEFAULTS = { margin: 10, step: 24, maxSteps: 40, legCost: 8 }
 
 /** Distance from the point to the segment */
 function distanceToSegment(p: Position, a: Position, b: Position): number {
@@ -36,8 +41,11 @@ function upward(d: Position): Position {
  * A connection point is put at the centroid of the devices it is linked to. If it overlaps a node, if a link to a
  * device passes through another node, or if it is on a link which is already drawn, it is moved away from the
  * centroid, perpendicular to the line between two devices (upward first: a link between devices in a row goes over
- * the row), or vertically for three or more devices. The nearest position which breaks nothing is used. If there is
- * none within `maxSteps`, the position which breaks the least (the nearest of them) is used.
+ * the row), or vertically for three or more devices.
+ * A position on a node or on a link is avoided first, whatever else it costs (if there is none within `maxSteps`, the
+ * one with the fewest such breaks is used). Among the others the cheapest is used: a step of moving costs 1 and a link
+ * through a node costs `legCost` steps. (A link through a node is gone around when it is drawn, but a connection
+ * point which is far from the devices only stretches the diagram.)
  * The ones which join closer devices are put first, so the longer links which go over them are nested outside.
  *
  * @param links links of the layer (the ones with a connection point, and between the devices, are used)
@@ -51,7 +59,7 @@ export function placeConnectors(
   radiusOf: (id: string) => number,
   options: PlaceOptions = {},
 ): Positions {
-  const { margin, step, maxSteps } = { ...DEFAULTS, ...options }
+  const { margin, step, maxSteps, legCost } = { ...DEFAULTS, ...options }
   const result: Positions = new Map()
   const all = new Map(placed)
   const connectorRadius = new Map(connectors.map((c) => [c.id, c.radius]))
@@ -106,23 +114,26 @@ export function placeConnectors(
       y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
     }
 
-    /** How many things the position breaks (stops counting at `limit`) */
-    const violations = (p: Position, limit: number): number => {
-      let count = 0
+    /**
+     * What the position breaks: `hard` (the connection point on a node or on a link: it is never traded for the other
+     * one) and `soft` (the links to the devices which pass through a node: the cost is `legCost` for each)
+     */
+    const breaksOf = (p: Position): { hard: number; soft: number } => {
+      let hard = 0
+      let soft = 0
       for (const [id, q] of all) {
-        if (Math.hypot(p.x - q.x, p.y - q.y) < connector.radius + radius(id) + margin && ++count >= limit)
-          return count
+        if (Math.hypot(p.x - q.x, p.y - q.y) < connector.radius + radius(id) + margin) hard++
       }
       for (const [a, b] of drawn) {
-        if (distanceToSegment(p, a, b) < connector.radius + margin && ++count >= limit) return count
+        if (distanceToSegment(p, a, b) < connector.radius + margin) hard++
       }
       for (const target of points) {
         for (const [id, q] of all) {
           if (q === target) continue
-          if (distanceToSegment(q, p, target) < radius(id) + margin && ++count >= limit) return count
+          if (distanceToSegment(q, p, target) < radius(id) + margin) soft++
         }
       }
-      return count
+      return { hard, soft: soft * legCost }
     }
 
     // the directions to move: perpendicular to the line (upward first) and then along it, or vertical for 3 or more
@@ -138,13 +149,18 @@ export function placeConnectors(
     }
     const directions = [normal, { x: -normal.x, y: -normal.y }, tangent, { x: -tangent.x, y: -tangent.y }]
 
-    let best = { position: centroid, count: violations(centroid, Number.POSITIVE_INFINITY) }
-    for (let n = 1; best.count > 0 && n <= maxSteps; n++) {
+    // the position with the fewest hard breaks, and then the cheapest: a link through a node and the distance (a step is
+    // 1). A position at the step n costs n or more, so the search stops when the best costs not more than the step.
+    const better = (a: { hard: number; cost: number }, b: { hard: number; cost: number }) =>
+      a.hard < b.hard || (a.hard === b.hard && a.cost < b.cost)
+    const centroidBreaks = breaksOf(centroid)
+    let best = { position: centroid, hard: centroidBreaks.hard, cost: centroidBreaks.soft }
+    for (let n = 1; (best.hard > 0 || best.cost > n) && n <= maxSteps; n++) {
       for (const d of directions) {
         const p = { x: centroid.x + d.x * step * n, y: centroid.y + d.y * step * n }
-        const count = violations(p, best.count) // not better than the best: it stops counting
-        if (count < best.count) best = { position: p, count }
-        if (best.count === 0) break
+        const { hard, soft } = breaksOf(p)
+        const candidate = { position: p, hard, cost: soft + n }
+        if (better(candidate, best)) best = candidate
       }
     }
     result.set(connector.id, best.position)

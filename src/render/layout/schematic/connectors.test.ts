@@ -142,6 +142,57 @@ describe('placeConnectors', () => {
     expect(distance(p2, p1, placed.get('b')!)).toBeGreaterThanOrEqual(R + 10 - 1e-6)
   })
 
+  it('accepts a link through a node (the router goes around it) rather than going far away from the devices', () => {
+    // a long link over a row, with short ones over the ends of the row: it would have to go very high to clear them
+    const placed = placedOf({ d0: [0, 0], d1: [30, 0], m: [300, 0], d3: [570, 0], d4: [600, 0] })
+    const links: Array<[string, string]> = [
+      ['near1', 'd0'],
+      ['near1', 'd1'],
+      ['near2', 'd3'],
+      ['near2', 'd4'],
+      ['far', 'd0'],
+      ['far', 'd4'],
+    ]
+    const heightOf = (options?: Parameters<typeof placeConnectors>[4]) =>
+      -place(['near1', 'near2', 'far'], links, placed, options).get('far')!.y
+    const strict = heightOf({ legCost: 1000 }) // no link through a node: as high as it takes
+    const lenient = heightOf({ legCost: 2 }) // a link through a node costs 2 steps
+    expect(strict).toBeGreaterThan(10 * 24)
+    expect(lenient).toBeLessThanOrEqual(3 * 24) // a few steps over the row
+    // a position on a node or a link is never accepted for that
+    const result = place(['near1', 'near2', 'far'], links, placed, { legCost: 2 })
+    const lines: Array<[string, string]> = [...links] // the lines which are drawn: the links of the connection points
+    for (const [id, p] of result) {
+      for (const [other, q] of [...placed, ...result]) {
+        if (other !== id) expect(Math.hypot(p.x - q.x, p.y - q.y)).toBeGreaterThanOrEqual(CLEAR)
+      }
+      for (const [a, b] of lines) {
+        if (a === id || b === id) continue // its own links
+        const [pa, pb] = [(placed.get(a) ?? result.get(a))!, (placed.get(b) ?? result.get(b))!]
+        expect(distance(p, pa, pb)).toBeGreaterThanOrEqual(R + 10)
+      }
+    }
+  })
+
+  it('goes over a link through a node only when it is cheaper than moving (legCost steps for each)', () => {
+    // between the rows (a, b in a row; the device in the way is one of the row): the link to b passes through `m`
+    const placed = placedOf({ a: [0, 0], m: [60, 0], b: [120, 0] })
+    const links: Array<[string, string]> = [
+      ['s', 'a'],
+      ['s', 'b'],
+    ]
+    const height = (legCost: number) => -place(['s'], links, placed, { legCost }).get('s')!.y
+    // the nearest position which clears `m` is a few steps over the row
+    const clear = height(1000)
+    expect(clear).toBeGreaterThan(0)
+    // a link through a node costs less than the steps to clear it: the point stays (here: on the device, it moves
+    // only as far as it must, as a point on a node is never accepted)
+    expect(height(0)).toBeLessThanOrEqual(clear)
+    // the point which is not on a node is chosen over the cheaper one which is on a node
+    const result = place(['s'], links, placed, { legCost: 0 })
+    expect(Math.hypot(result.get('s')!.x - 60, result.get('s')!.y)).toBeGreaterThanOrEqual(CLEAR)
+  })
+
   it('uses the position which breaks the least when nothing is free within maxSteps (not a failure)', () => {
     const placed = placedOf({ a: [0, 0], b: [100, 0], c: [200, 0] })
     const links: Array<[string, string]> = [
