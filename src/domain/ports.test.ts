@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { radiusForPorts, spreadAngles } from './ports'
+import { placeAngles, radiusForPorts, spreadAngles } from './ports'
 
 const TAU = Math.PI * 2
 /** angular distance between two angles (0..PI) */
@@ -59,6 +59,90 @@ describe('spreadAngles', () => {
     const result = spreadAngles([3, 0.5], 0.3)
     expect(result[0]).toBeCloseTo(3, 6)
     expect(result[1]).toBeCloseTo(0.5, 6)
+  })
+})
+
+describe('placeAngles', () => {
+  it('keeps a pinned port where it is, and the others keep away from it', () => {
+    const result = placeAngles(
+      [
+        { desired: 1, kind: 'pinned' },
+        { desired: 1.05, kind: 'straight' },
+        { desired: 0.95, kind: 'straight' },
+      ],
+      0.4,
+    )
+    expect(result[0]).toBeCloseTo(1, 3)
+    expect(minGapOf(result)).toBeGreaterThanOrEqual(0.4 - 1e-6)
+  })
+
+  it('moves a port which is alone as little as possible (it is not pushed by the ports on the other side)', () => {
+    const result = placeAngles(
+      [
+        { desired: 0, kind: 'straight' },
+        { desired: 3, kind: 'straight' },
+        { desired: 3.05, kind: 'straight' },
+        { desired: 3.1, kind: 'straight' },
+      ],
+      0.4,
+    )
+    expect(result[0]).toBeCloseTo(0, 6)
+    expect(minGapOf(result)).toBeGreaterThanOrEqual(0.4 - 1e-6)
+  })
+
+  it('puts a loose port in a free place nearest to its desired angle without moving the other ports', () => {
+    const straight = [
+      { desired: 0, kind: 'straight' as const },
+      { desired: 0.3, kind: 'straight' as const },
+      { desired: 2, kind: 'straight' as const },
+    ]
+    const without = placeAngles(straight, 0.3)
+    const result = placeAngles([...straight, { desired: 0.15, kind: 'loose' }], 0.3)
+    expect(result.slice(0, 3)).toEqual(without)
+    expect(minGapOf(result)).toBeGreaterThanOrEqual(0.3 - 1e-6)
+    // (the free places nearest to 0.15: 0.3 away from the ports at 0 and 0.3)
+    expect(distance(result[3] ?? 0, 0.15)).toBeLessThanOrEqual(0.45 + 1e-6)
+    expect(distance(result[3] ?? 0, 0.15)).toBeGreaterThan(0.1)
+  })
+
+  it('places all the ports together when there is no free place for a loose port', () => {
+    const result = placeAngles(
+      [
+        { desired: 0, kind: 'straight' },
+        { desired: 2.1, kind: 'straight' },
+        { desired: 4.2, kind: 'straight' },
+        { desired: 1, kind: 'loose' },
+      ],
+      1.5,
+    )
+    expect(minGapOf(result)).toBeGreaterThanOrEqual(1.5 - 1e-6)
+  })
+})
+
+describe('placeAngles (many cases)', () => {
+  it('never puts ports closer than the gap, and keeps the pinned ports when there is room', () => {
+    let seed = 12345
+    const random = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296
+    for (let trial = 0; trial < 300; trial++) {
+      const count = 2 + Math.floor(random() * 12)
+      const gap = 0.2 + random() * 0.3
+      const kinds = ['pinned', 'straight', 'straight', 'loose'] as const
+      const ports = Array.from({ length: Math.min(count, Math.floor(TAU / gap)) }, () => ({
+        desired: random() * TAU,
+        kind: kinds[Math.floor(random() * kinds.length)]!,
+      }))
+      const result = placeAngles(ports, gap)
+      if (ports.length > 1) expect(minGapOf(result)).toBeGreaterThanOrEqual(gap - 1e-6)
+      // (a pinned port is kept unless pinned ports are nearer than the gap to each other, or a straight port is squeezed
+      // between them: then there is no room for it without moving them)
+      if (ports.some((p) => p.kind === 'straight')) continue
+      const pinned = ports.flatMap((p, i) => (p.kind === 'pinned' ? [i] : []))
+      const apart = pinned.every((i) =>
+        pinned.every((j) => i === j || distance(ports[i]!.desired, ports[j]!.desired) >= gap),
+      )
+      if (apart)
+        for (const i of pinned) expect(distance(result[i] ?? 0, ports[i]!.desired)).toBeLessThan(1e-3)
+    }
   })
 })
 

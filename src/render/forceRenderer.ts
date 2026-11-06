@@ -14,7 +14,7 @@ import { select, type Selection } from 'd3-selection'
 import { zoom, zoomIdentity, type ZoomBehavior } from 'd3-zoom'
 import type { DisplayGraph, DisplayLink, DisplayNode } from '../domain/graph'
 import { countCrossings, overlapDepth, type Segment } from '../domain/layoutScore'
-import { radiusForPorts, spreadAngles } from '../domain/ports'
+import { placeAngles, radiusForPorts, type PortSpec } from '../domain/ports'
 import { layoutWithStress } from './layout/stress'
 import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
@@ -77,6 +77,8 @@ const ROUTE_BUDGET_MS = 6
 const PORT_RADIUS = 4.5
 /** Length of the arc of a node circle reserved for a port */
 const PORT_ARC = 14
+/** The links side by side between two nodes are within this part of the radius from the line between the centers */
+const PARALLEL_SPAN = 0.85
 /** Space around a node kept by the layout (for labels and links) */
 const NODE_MARGIN = 20
 const LAYER_SPACING_X = 800
@@ -207,6 +209,12 @@ export class ForceRenderer {
   private portsOf = new Map<string, Item[]>()
   /** ID of the port => IDs of the nodes connected to the port */
   private peersOf = new Map<string, Set<string>>()
+  /**
+   * ID of the port => how far its link is from the line between the centers of the nodes (the same on both nodes: the
+   * links between the same two nodes are parallel). Only for the ports of the links which are more than one between
+   * the same nodes.
+   */
+  private portOffsets = new Map<string, number>()
   private readonly positions = new Map<string, { x: number; y: number }>()
   /** ID of the port => angle on the circle of its node, set by the user dragging the port */
   private readonly pinnedAngles = new Map<string, number>()
@@ -426,11 +434,26 @@ export class ForceRenderer {
       if (node.type === 'tp' && node.parent)
         portCounts.set(node.parent, (portCounts.get(node.parent) ?? 0) + 1)
     }
+    // the links between the same nodes are side by side: the node is large enough for the most of them
+    const parentOf = new Map(graph.nodes.map((node) => [node.id, node.parent]))
+    const parallel = new Map<string, number>()
+    const sameNodes = new Map<string, number>()
+    for (const link of graph.links) {
+      const [a, b] = [parentOf.get(link.source), parentOf.get(link.target)]
+      if (link.type !== 'link' || !a || !b || a === b) continue
+      const key = a < b ? `${a}\n${b}` : `${b}\n${a}`
+      const count = (sameNodes.get(key) ?? 0) + 1
+      sameNodes.set(key, count)
+      for (const node of [a, b]) parallel.set(node, Math.max(parallel.get(node) ?? 0, count))
+    }
     const items = graph.nodes.map((node): Item => {
       if (node.type === 'tp') return { ...node, radius: PORT_RADIUS }
       const ports = portCounts.get(node.id) ?? 0
       const collapsed = NODE_RADIUS + Math.min(6, Math.log2((node.tpCount ?? 0) + 1))
-      return { ...node, radius: ports > 0 ? radiusForPorts(NODE_RADIUS, ports, PORT_ARC) : collapsed }
+      if (ports === 0) return { ...node, radius: collapsed }
+      // (the outer links of n links side by side are at most PARALLEL_SPAN of the radius from the center line)
+      const side = (((parallel.get(node.id) ?? 1) - 1) * PORT_ARC) / (2 * PARALLEL_SPAN)
+      return { ...node, radius: Math.max(radiusForPorts(NODE_RADIUS, ports, PORT_ARC), side) }
     })
     this.bodies = items.filter((item) => item.type === 'node')
     this.ports = items.filter((item) => item.type === 'tp')
@@ -458,6 +481,42 @@ export class ForceRenderer {
       else bundles.set(key, { source: a, target: b, count: link.count })
     }
     this.simLinks = [...bundles.values()]
+    this.portOffsets = this.parallelOffsets(nodeOf)
+  }
+
+  /**
+   * The links between the same two nodes (term-points of both) are put side by side, PORT_ARC apart, on both sides of
+   * the line between the centers. The port of the node which comes first in the order of the IDs gets the offset, and the
+   * port of the other node the opposite one, so that the links are parallel.
+   */
+  private parallelOffsets(nodeOf: (id: string) => string): Map<string, number> {
+    const isPort = (id: string) => this.itemById.get(id)?.type === 'tp'
+    const linkCount = new Map<string, number>()
+    for (const link of this.drawLinks) {
+      for (const end of [link.source, link.target]) linkCount.set(end, (linkCount.get(end) ?? 0) + 1)
+    }
+    const pairs = new Map<string, DisplayLink[]>()
+    for (const link of this.drawLinks) {
+      if (!isPort(link.source) || !isPort(link.target)) continue
+      const [a, b] = [nodeOf(link.source), nodeOf(link.target)]
+      if (a === b) continue
+      const key = a < b ? `${a}\n${b}` : `${b}\n${a}`
+      pairs.set(key, [...(pairs.get(key) ?? []), link])
+    }
+    const offsets = new Map<string, number>()
+    for (const links of pairs.values()) {
+      if (links.length < 2) continue
+      links.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+      links.forEach((link, k) => {
+        const offset = (k - (links.length - 1) / 2) * PORT_ARC
+        const [first, second] =
+          nodeOf(link.source) < nodeOf(link.target) ? [link.source, link.target] : [link.target, link.source]
+        // (a port which has more than one link is not put aside: it is toward the nodes it is linked to)
+        if (linkCount.get(first) === 1) offsets.set(first, offset)
+        if (linkCount.get(second) === 1) offsets.set(second, -offset)
+      })
+    }
+    return offsets
   }
 
   private addPeer(portId: string, peerNode: string): void {
@@ -704,13 +763,20 @@ export class ForceRenderer {
       const node = this.itemById.get(parentId)
       if (!node) continue
       const [cx, cy] = [node.x ?? 0, node.y ?? 0]
-      const desired = ports.map(
-        (port) => this.portHints.get(port.id) ?? this.desiredAngle(node, port, center),
-      )
-      const angles = spreadAngles(desired, PORT_ARC / node.radius)
+      // The priority: the port the user moved, the ports of straight links (toward the node they are linked to, side by
+      // side if there are more links between the nodes), and then the others (the ports of the links which go around
+      // something, toward where the route leaves; the ports without a link), which take a free place.
+      const specs = ports.map((port): PortSpec => {
+        const pinned = this.pinnedAngles.get(port.id)
+        if (pinned !== undefined) return { desired: pinned, kind: 'pinned' }
+        const hint = this.portHints.get(port.id)
+        if (hint !== undefined) return { desired: hint, kind: 'loose' }
+        const linked = (this.peersOf.get(port.id)?.size ?? 0) > 0
+        return { desired: this.desiredAngle(node, port, center), kind: linked ? 'straight' : 'loose' }
+      })
+      const angles = placeAngles(specs, PORT_ARC / node.radius)
       ports.forEach((port, i) => {
-        // a port moved by the user keeps its angle
-        const angle = this.pinnedAngles.get(port.id) ?? angles[i] ?? 0
+        const angle = angles[i] ?? 0
         port.angle = angle
         port.x = cx + node.radius * Math.cos(angle)
         port.y = cy + node.radius * Math.sin(angle)
@@ -742,7 +808,10 @@ export class ForceRenderer {
       dx = (node.x ?? 0) - center.x
       dy = (node.y ?? 0) - center.y
     }
-    return Math.atan2(dy, dx)
+    // the links between the same nodes are side by side: the port is aside the line between the centers
+    const offset = this.portOffsets.get(port.id)
+    const aside = offset === undefined ? 0 : Math.asin(Math.max(-1, Math.min(1, offset / node.radius)))
+    return Math.atan2(dy, dx) + aside
   }
 
   // --- drawing
