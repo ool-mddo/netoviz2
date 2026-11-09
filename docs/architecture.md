@@ -107,9 +107,9 @@ URL を直接書き換えた場合も、選択・レイヤ・エンジンは URL
 flowchart TB
     api["API<br/>(summary / layers / supports / attributes / profiles)"] --> client["api/client.ts"]
     client --> topo["stores/topology<br/>(summary、レイヤ、supports、属性)"]
-    topo --> graph["domain/graph.ts<br/>(表示用グラフ)"]
+    topo --> dg["domain/graph.ts<br/>(表示用グラフ)"]
     topo --> sel["stores/selection<br/>(選択、トレース)"]
-    graph --> fv["components/ForceView"]
+    dg --> fv["components/ForceView"]
     sel --> fv
     fv --> fr["render/ForceRenderer<br/>(SVG)"]
     sel --> dv["components/DependencyView"]
