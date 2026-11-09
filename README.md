@@ -49,16 +49,17 @@ docker compose up -d
 表示の状態は、URL のクエリで指定でき、リンクで共有できます (ID は URL エンコードします)。
 
 ```
-/netoviz2/<network>/<snapshot>?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1
+/netoviz2/<network>/<snapshot>?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&layerlayout=<column|grid>&profile=<名前>&dependency=1
 ```
 
-| クエリ       | 内容                                                |
-| ------------ | --------------------------------------------------- |
-| `layers`     | 表示するレイヤ                                      |
-| `sel`        | 選択するオブジェクト                                |
-| `layout`     | レイアウト: `stress` (既定) / `force` / `schematic` |
-| `profile`    | schematic のプロファイルの名前                      |
-| `dependency` | `1` で依存関係の副画面を表示                        |
+| クエリ        | 内容                                                               |
+| ------------- | ------------------------------------------------------------------ |
+| `layers`      | 表示するレイヤ                                                     |
+| `sel`         | 選択するオブジェクト                                               |
+| `layout`      | レイアウト: `stress` (既定) / `force` / `schematic`                |
+| `layerlayout` | レイヤの並べ方: `column` (既定。縦 1 列、中央揃え) / `grid` (格子) |
+| `profile`     | schematic のプロファイルの名前                                     |
+| `dependency`  | `1` で依存関係の副画面を表示                                       |
 
 ### schematic レイアウト
 

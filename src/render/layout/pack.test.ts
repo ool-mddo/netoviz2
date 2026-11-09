@@ -33,4 +33,28 @@ describe('packBoxes', () => {
       }
     }
   })
+
+  it('puts boxes in a single column when the number of the columns is 1', () => {
+    const boxes = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((key, i) => ({ key, width: 100 + i, height: 50 }))
+    const positions = packBoxes(boxes, 10, 1)
+    boxes.forEach((box, i) => {
+      expect(positions.get(box.key)).toEqual({ x: 0, y: i * 60 })
+    })
+  })
+
+  it('arranges 7 boxes in 3 columns by default', () => {
+    const boxes = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((key) => ({ key, width: 10, height: 10 }))
+    const xs = new Set([...packBoxes(boxes, 0).values()].map((p) => p.x))
+    expect(xs.size).toBe(3)
+  })
+
+  it('centers the boxes in their column with align center', () => {
+    const boxes = [
+      { key: 'a', width: 100, height: 50 },
+      { key: 'b', width: 300, height: 50 },
+    ]
+    const positions = packBoxes(boxes, 10, 1, 'center')
+    expect(positions.get('a')).toEqual({ x: 100, y: 0 })
+    expect(positions.get('b')).toEqual({ x: 0, y: 60 })
+  })
 })

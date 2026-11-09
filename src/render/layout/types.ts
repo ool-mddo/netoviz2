@@ -20,6 +20,26 @@ export function parseLayoutEngine(value: unknown): LayoutEngine | undefined {
   return LAYOUT_ENGINES.find((engine) => engine.id === value)?.id
 }
 
+/**
+ * Arrangement of the layers in the view:
+ * - grid: in a grid (ceil(sqrt(n)) columns)
+ * - column: in a single column, centered (top to bottom in the order of the layers, the default)
+ */
+export const LAYER_ARRANGEMENTS: ReadonlyArray<{ id: LayerArrangement; label: string }> = [
+  { id: 'column', label: 'column' },
+  { id: 'grid', label: 'grid' },
+]
+
+export type LayerArrangement = 'grid' | 'column'
+
+/** Arrangement used when it is not specified */
+export const DEFAULT_LAYER_ARRANGEMENT: LayerArrangement = 'column'
+
+/** @returns the arrangement if the value is a valid one (e.g. a value of the URL query), otherwise undefined */
+export function parseLayerArrangement(value: unknown): LayerArrangement | undefined {
+  return value === 'grid' || value === 'column' ? value : undefined
+}
+
 export interface Position {
   x: number
   y: number

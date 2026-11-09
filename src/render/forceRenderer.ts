@@ -31,6 +31,7 @@ import type {
   SchematicStructure,
 } from './layout/schematic/types'
 import {
+  type LayerArrangement,
   type LayerLayoutFn,
   type LayoutEngine,
   type LayoutStats,
@@ -128,6 +129,8 @@ export interface RendererOptions {
   multiStart?: number
   /** Layout engine (default: force) */
   engine?: LayoutEngine
+  /** Arrangement of the layers: in a grid or in a single column (default: grid) */
+  layerArrangement?: LayerArrangement
   /** Function to arrange with the own stress layout (default: layoutWithStress) */
   stressLayout?: LayerLayoutFn
   /** Function to arrange with the schematic layout (default: layoutSchematic) */
@@ -171,6 +174,7 @@ export class ForceRenderer {
   private readonly zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>
   private readonly multiStart: number
   private engine: LayoutEngine
+  private layerArrangement: LayerArrangement
   private readonly stressLayout: LayerLayoutFn
   private readonly schematicLayout: SchematicLayerFn
   private profiles: readonly DiagramProfile[]
@@ -246,6 +250,7 @@ export class ForceRenderer {
   ) {
     this.multiStart = options.multiStart ?? DEFAULT_MULTISTART
     this.engine = options.engine ?? 'force'
+    this.layerArrangement = options.layerArrangement ?? 'grid'
     this.stressLayout =
       options.stressLayout ?? ((nodes, links) => Promise.resolve(layoutWithStress(nodes, links)))
     this.schematicLayout = options.schematicLayout ?? layoutSchematic
@@ -336,6 +341,18 @@ export class ForceRenderer {
     this.relayout()
   }
 
+  /** Change the arrangement of the layers: all the nodes are arranged again */
+  setLayerArrangement(arrangement: LayerArrangement): void {
+    if (arrangement === this.layerArrangement) return
+    this.layerArrangement = arrangement
+    this.relayout()
+  }
+
+  /** Number of the columns of the layers (undefined: nearly square, by the number of the layers) */
+  private layerColumns(): number | undefined {
+    return this.layerArrangement === 'column' ? 1 : undefined
+  }
+
   /** Change the diagram profiles (the schematic layout is made again with them) */
   setProfiles(profiles: readonly DiagramProfile[]): void {
     // nothing changes without profiles (and a relayout forgets the positions the user moved)
@@ -420,7 +437,7 @@ export class ForceRenderer {
 
   private layerCenter(layer: string): { x: number; y: number } {
     const index = this.areaIndex.get(layer) ?? 0
-    const columns = Math.max(1, Math.ceil(Math.sqrt(this.areaIndex.size)))
+    const columns = Math.max(1, this.layerColumns() ?? Math.ceil(Math.sqrt(this.areaIndex.size)))
     return { x: (index % columns) * LAYER_SPACING_X, y: Math.floor(index / columns) * LAYER_SPACING_Y }
   }
 
@@ -603,7 +620,7 @@ export class ForceRenderer {
     const links = this.simLinks.map(
       (link) => `${this.itemOf(link.source)?.id}>${this.itemOf(link.target)?.id}`,
     )
-    return `${this.engine}|${this.engine === 'schematic' ? this.basesVersion : 0}|${nodes}|${links.join(',')}`
+    return `${this.engine}|${this.layerArrangement}|${this.engine === 'schematic' ? this.basesVersion : 0}|${nodes}|${links.join(',')}`
   }
 
   /** Arrange the nodes of each layer by the engine and put the layouts of the layers in a grid */
@@ -640,7 +657,12 @@ export class ForceRenderer {
       const [minX, minY] = [Math.min(...xs), Math.min(...ys)]
       return { key: layer, width: Math.max(...xe) - minX, height: Math.max(...ye) - minY, minX, minY }
     })
-    const offsets = packBoxes(extents, LAYER_GAP)
+    const offsets = packBoxes(
+      extents,
+      LAYER_GAP,
+      this.layerColumns(),
+      this.layerArrangement === 'column' ? 'center' : 'start',
+    )
     for (const { layer, items, positions } of results) {
       const [offset, extent] = [offsets.get(layer), extents.find((e) => e.key === layer)]
       for (const item of items) {

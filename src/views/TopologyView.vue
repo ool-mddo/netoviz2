@@ -10,7 +10,14 @@ import ViewToolbar from '../components/ViewToolbar.vue'
 import { usePolling } from '../composables/usePolling'
 import { useSelect } from '../composables/useSelect'
 import { defaultVisibleLayers } from '../domain/layers'
-import { DEFAULT_LAYOUT_ENGINE, parseLayoutEngine, type LayoutEngine } from '../render/layout/types'
+import {
+  DEFAULT_LAYER_ARRANGEMENT,
+  DEFAULT_LAYOUT_ENGINE,
+  parseLayerArrangement,
+  parseLayoutEngine,
+  type LayerArrangement,
+  type LayoutEngine,
+} from '../render/layout/types'
 import { useSelectionStore } from '../stores/selection'
 import { useTopologyStore } from '../stores/topology'
 
@@ -90,12 +97,22 @@ usePolling(reload, RELOAD_INTERVAL_MS)
 const engine = computed<LayoutEngine>(() => parseLayoutEngine(route.query.layout) ?? DEFAULT_LAYOUT_ENGINE)
 /** Diagram profile of the schematic layout (`?profile=<name>`) */
 const profile = computed(() => (typeof route.query.profile === 'string' ? route.query.profile : undefined))
+/** Arrangement of the layers (`?layerlayout=grid` for a grid, default: column) */
+const layerArrangement = computed<LayerArrangement>(
+  () => parseLayerArrangement(route.query.layerlayout) ?? DEFAULT_LAYER_ARRANGEMENT,
+)
 const dependencyOn = computed(() => route.query.dependency === '1')
 
 function setEngine(next: LayoutEngine): void {
   const query = { ...route.query }
   if (next === DEFAULT_LAYOUT_ENGINE) delete query.layout
   else query.layout = next
+  void router.replace({ query })
+}
+function setLayerArrangement(next: LayerArrangement): void {
+  const query = { ...route.query }
+  if (next === DEFAULT_LAYER_ARRANGEMENT) delete query.layerlayout
+  else query.layerlayout = next
   void router.replace({ query })
 }
 function setDependency(on: boolean): void {
@@ -148,8 +165,10 @@ onBeforeUnmount(() => selection.select(null))
           <ForceView
             :visible-layers="visibleLayers"
             :engine="engine"
+            :layer-arrangement="layerArrangement"
             :profile="profile"
             @update:engine="setEngine"
+            @update:layer-arrangement="setLayerArrangement"
           />
           <DependencyView v-if="dependencyOn" :visible-layers="visibleLayers" />
         </div>

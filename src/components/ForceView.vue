@@ -16,8 +16,12 @@ import type { SchematicBase, SchematicReport } from '../render/layout/schematic/
 import { lowerLayerIdsOf, schematicBasesOf } from '../domain/schematicBases'
 import SchematicReportPanel from './SchematicReportPanel.vue'
 import {
+  DEFAULT_LAYER_ARRANGEMENT,
+  LAYER_ARRANGEMENTS,
   LAYOUT_ENGINES,
+  parseLayerArrangement,
   parseLayoutEngine,
+  type LayerArrangement,
   type LayoutEngine,
   type LayoutStats,
 } from '../render/layout/types'
@@ -28,12 +32,17 @@ import { useViewStore } from '../stores/view'
 const props = defineProps<{
   visibleLayers: string[]
   engine: LayoutEngine
+  /** Arrangement of the layers (default: column) */
+  layerArrangement?: LayerArrangement
   /** Name of the diagram profile for the schematic layout */
   profile?: string
   /** Source of the profiles (default: the API of the backend) */
   profileSource?: ProfileSource
 }>()
-const emit = defineEmits<{ 'update:engine': [engine: LayoutEngine] }>()
+const emit = defineEmits<{
+  'update:engine': [engine: LayoutEngine]
+  'update:layerArrangement': [arrangement: LayerArrangement]
+}>()
 
 const topology = useTopologyStore()
 const selection = useSelectionStore()
@@ -106,6 +115,7 @@ onMounted(() => {
     },
     {
       engine: props.engine,
+      layerArrangement: props.layerArrangement ?? DEFAULT_LAYER_ARRANGEMENT,
       schematicBases: bases,
       onLayout: (result) => {
         arranging.value = result === null
@@ -291,11 +301,24 @@ watch(
   },
 )
 
+watch(
+  () => props.layerArrangement,
+  (arrangement) => {
+    // (while the schematic layout waits for the profiles/bases, the layout which comes next uses the arrangement)
+    renderer?.setLayerArrangement(arrangement ?? DEFAULT_LAYER_ARRANGEMENT)
+  },
+)
+
 const statsText = computed(() => {
   const s = stats.value
   if (!s) return ''
   return `${s.ms} ms / crossings ${s.crossings} / overlap ${s.overlap.toFixed(1)} / ${s.nodes} nodes, ${s.links} links`
 })
+
+function onLayerArrangementChange(event: Event): void {
+  const arrangement = parseLayerArrangement((event.target as HTMLSelectElement).value)
+  if (arrangement) emit('update:layerArrangement', arrangement)
+}
 
 function onEngineChange(event: Event): void {
   const engine = parseLayoutEngine((event.target as HTMLSelectElement).value)
@@ -310,6 +333,16 @@ function onEngineChange(event: Event): void {
         Layout
         <select :value="engine" data-testid="layout-select" @change="onEngineChange">
           <option v-for="item in LAYOUT_ENGINES" :key="item.id" :value="item.id">{{ item.label }}</option>
+        </select>
+      </label>
+      <label>
+        Layers
+        <select
+          :value="layerArrangement ?? DEFAULT_LAYER_ARRANGEMENT"
+          data-testid="layer-arrangement-select"
+          @change="onLayerArrangementChange"
+        >
+          <option v-for="item in LAYER_ARRANGEMENTS" :key="item.id" :value="item.id">{{ item.label }}</option>
         </select>
       </label>
       <button type="button" data-testid="fit" @click="renderer?.fit()">Fit</button>

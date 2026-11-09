@@ -7,6 +7,7 @@ netoviz2 (汎用トポロジビューワー) が、ノードとリンクをど�
 
 - レイアウトエンジンは **force (d3-force)**、**stress (自前のストレス最小化)**、**schematic (構成図向け。プロファイルに従って向き・並びを決める。3.3.1)** の 3 つ。**既定は stress**。
 - **ELK (elkjs) は採用しない。** 検証 (3 参照) では品質で自前の stress に及ばず、ライセンス (EPL-2.0) への対応と約 1.5MB のサイズが必要になるため。
+- レイヤの並べ方 (`?layerlayout=<column|grid>`。既定は column) も、画面 (Layers セレクト) で切り替えられる。column は縦 1 列で中央揃え (幅が最大のレイヤに合わせる)、grid は `ceil(sqrt(n))` 列の格子。順序は `layersTopDown` (上から下)。stress / schematic は `layout/pack.ts` の `packBoxes(boxes, gap, columns, align)`、force は `forceRenderer.ts` の `layerCenter` で決める (両方を揃えて変える)。
 - エンジンは、画面で切り替えられる (`?layout=<force|stress|schematic>`。schematic のプロファイルは `&profile=<名前>`)。パネルが、所要時間・リンクの交差数・ノードの重なりを表示する。(エンジンの比較用の「Compare layouts」(`&compare=`) は、検証が済んだため削除した。副画面の枠は dependency view に使っている。)
 - 階層的な表示 (ELK layered が得意とするもの) は、レイアウトエンジンではなく、段階 4 の dependency 表示 (レイヤ帯) で別に扱う。
 
