@@ -139,7 +139,8 @@ const upperItems = computed(() => traced('upper'))
 .attribute-panel {
   border: 1px solid var(--border);
   padding: 0.5rem 0.75rem;
-  height: 72vh;
+  /* the height is given by the grid row of the parent (the same as the views) */
+  min-height: 0;
   overflow: auto;
   box-sizing: border-box;
 }

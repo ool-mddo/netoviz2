@@ -34,6 +34,8 @@ const props = defineProps<{
   engine: LayoutEngine
   /** Arrangement of the layers (default: column) */
   layerArrangement?: LayerArrangement
+  /** Counted up when the size of the view is changed from outside: the figure is fitted to the new size */
+  fitSignal?: number
   /** Name of the diagram profile for the schematic layout */
   profile?: string
   /** Source of the profiles (default: the API of the backend) */
@@ -309,6 +311,11 @@ watch(
   },
 )
 
+watch(
+  () => props.fitSignal,
+  () => renderer?.fit(),
+)
+
 const statsText = computed(() => {
   const s = stats.value
   if (!s) return ''
@@ -328,48 +335,71 @@ function onEngineChange(event: Event): void {
 
 <template>
   <div class="force-view" :data-engine="engine">
-    <div class="toolbar">
-      <label>
-        Layout
-        <select :value="engine" data-testid="layout-select" @change="onEngineChange">
-          <option v-for="item in LAYOUT_ENGINES" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-      </label>
-      <label>
-        Layers
-        <select
-          :value="layerArrangement ?? DEFAULT_LAYER_ARRANGEMENT"
-          data-testid="layer-arrangement-select"
-          @change="onLayerArrangementChange"
-        >
-          <option v-for="item in LAYER_ARRANGEMENTS" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-      </label>
-      <button type="button" data-testid="fit" @click="renderer?.fit()">Fit</button>
-      <span class="stats" data-testid="layout-stats" :data-engine="stats?.engine">{{
-        arranging ? 'arranging...' : statsText
-      }}</span>
-      <span v-if="engine === 'schematic'" class="hint" data-testid="drag-hint"
-        >Drag: move a node (20px grid) · Shift+drag: its row · Ctrl/⌘+drag: its column</span
-      >
-      <span v-if="profileError" class="error" data-testid="profile-error">{{ profileError }}</span>
+    <div class="view-main">
+      <div class="toolbar">
+        <label>
+          Layout
+          <select :value="engine" data-testid="layout-select" @change="onEngineChange">
+            <option v-for="item in LAYOUT_ENGINES" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </select>
+        </label>
+        <label>
+          Layers
+          <select
+            :value="layerArrangement ?? DEFAULT_LAYER_ARRANGEMENT"
+            data-testid="layer-arrangement-select"
+            @change="onLayerArrangementChange"
+          >
+            <option v-for="item in LAYER_ARRANGEMENTS" :key="item.id" :value="item.id">
+              {{ item.label }}
+            </option>
+          </select>
+        </label>
+        <button type="button" data-testid="fit" @click="renderer?.fit()">Fit</button>
+      </div>
+      <svg ref="svgEl" class="force-svg" data-testid="force-svg" />
     </div>
-    <SchematicReportPanel
-      v-if="engine === 'schematic' && reports.length > 0"
-      :reports="reports"
-      :profiles="profileLabels"
-      :note="profileNote"
-    />
-    <svg ref="svgEl" class="force-svg" data-testid="force-svg" />
+    <!-- information of the layout is under the svg (the viewer comes first) -->
+    <div class="info" data-testid="layout-info">
+      <div class="toolbar">
+        <span class="stats" data-testid="layout-stats" :data-engine="stats?.engine">{{
+          arranging ? 'arranging...' : statsText
+        }}</span>
+        <span v-if="engine === 'schematic'" class="hint" data-testid="drag-hint"
+          >Drag: move a node (20px grid) · Shift+drag: its row · Ctrl/⌘+drag: its column</span
+        >
+        <span v-if="profileError" class="error" data-testid="profile-error">{{ profileError }}</span>
+      </div>
+      <SchematicReportPanel
+        v-if="engine === 'schematic' && reports.length > 0"
+        :reports="reports"
+        :profiles="profileLabels"
+        :note="profileNote"
+      />
+    </div>
   </div>
 </template>
 
 <style>
+/* the toolbar and the svg have a fixed height (the svg keeps its size): the information is added under them */
+.force-view .view-main {
+  display: flex;
+  flex-direction: column;
+  height: var(--viewer-height, 72vh);
+  min-height: 0;
+}
 .force-view .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 0.25rem;
+}
+.force-view .info {
+  margin-top: 0.25rem;
+}
+.force-view .info .toolbar {
+  margin-bottom: 0;
 }
 .force-view .stats {
   opacity: 0.7;
@@ -384,7 +414,8 @@ function onEngineChange(event: Event): void {
 }
 .force-svg {
   width: 100%;
-  height: 72vh;
+  flex: 1 1 0;
+  min-height: 0;
   border: 1px solid var(--border);
   cursor: grab;
 }

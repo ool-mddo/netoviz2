@@ -80,12 +80,21 @@ src/
 ```
 TopologyView
 ├─ SummaryBar        トポロジの概要 (networks の flags、警告、diff の有無)
-├─ LayerList         レイヤの表示切替
+├─ LayerList         レイヤの表示切替 (左のカラム。タブで細い帯に折りたためる)
 ├─ ViewToolbar       Term-points、Trace、Dependency view の切替
-├─ ForceView         トポロジ表示 (ForceRenderer を使う) + エンジンの切替 + schematic のパネル
-├─ DependencyView    選択したオブジェクトの依存ツリー (副画面。?dependency=1)
+├─ ForceView         トポロジ表示 (ForceRenderer を使う) + エンジンとレイヤの並べ方の切替。図の下に、統計と schematic のパネル
+├─ DependencyView    選択したオブジェクトの依存ツリー (副画面。?dependency=1)。図の下に、注意文と問題の一覧
 └─ AttributePanel    選択したオブジェクトの属性・diff・support
 ```
+
+### 画面の配置
+
+`TopologyView` は、左のレイヤ一覧、図 (ForceView、DependencyView)、AttributePanel を 1 つのグリッドに並べます。
+
+- **高さを揃える:** 図の部分 (ツールバーと svg) と AttributePanel は、同じ固定の高さ (`.layout` の `--viewer-height`、72vh) です。svg はその残りを使うので、メッセージが増減しても大きさが変わりません。
+- **情報は図の下に足す:** 統計、schematic のパネル、注意文、問題の一覧は、各 View の `.info` に表示します。高さは固定せず、内容なりに伸ばします (ページが下に伸びる。図を小さくしない)。
+- **レイヤ一覧の折りたたみ:** 「Layers」タブで、左のカラムを細い帯 (`--side-width`) にできる。選択はブラウザの `localStorage` (`netoviz2.sideCollapsed`) に保存する。幅が変わったら、各 View に `fitSignal` で知らせて、図を新しい大きさに合わせ直す。
+- **favicon:** `public/` に置く (`favicon.svg`、`favicon.ico`、`apple-touch-icon.png`)。ool-mddo の組織のアイコンを、小さくても見分けられるように単純化したもの。`index.html` から参照する (ビルドで `/netoviz2/` 配下のパスになる)。
 
 ### URL に持つ状態
 

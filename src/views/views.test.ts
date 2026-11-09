@@ -134,6 +134,21 @@ describe('TopologyView', () => {
     expect(wrapper.findAll('g.node:not(.tp)')).toHaveLength(1)
   })
 
+  it('collapses the layer list, and keeps the choice in the browser', async () => {
+    localStorage.removeItem('netoviz2.sideCollapsed')
+    const wrapper = await mountView('/nw/ss')
+    expect(wrapper.find('[data-testid=select-all]').exists()).toBe(true)
+    await wrapper.get('[data-testid=side-toggle]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid=select-all]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid=layer-dots]').exists()).toBe(true)
+    expect(localStorage.getItem('netoviz2.sideCollapsed')).toBe('1')
+    await wrapper.get('[data-testid=side-toggle]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid=select-all]').exists()).toBe(true)
+    expect(localStorage.getItem('netoviz2.sideCollapsed')).toBeNull()
+  })
+
   it('ignores unknown layers in the URL query', async () => {
     const wrapper = await mountView('/nw/ss?layers=nothing')
     expect(mocked.getLayer).not.toHaveBeenCalled()
