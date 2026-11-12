@@ -1,6 +1,6 @@
 {
   "name": "netoviz2",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Multi-layer network topology viewer for ool-mddo (frontend only; data comes from netomox-exp)",
   "license": "MIT",
