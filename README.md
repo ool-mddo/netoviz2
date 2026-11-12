@@ -40,25 +40,27 @@ docker compose up -d
 ### 画面の操作
 
 1. `/netoviz2/` で network を選び、snapshot を選びます。
-2. 左のチェックボックスで、表示するレイヤを選びます (レイヤが多いときは、最上位のレイヤだけが表示されます)。
+2. 左のチェックボックスで、表示するレイヤを選びます (レイヤが多いときは、最上位のレイヤだけが表示されます)。左上の「Layers」タブで、レイヤの一覧を細い帯に折りたたんで、画面を広げられます (色付きの丸でレイヤの表示を切り替えられる。折りたたみの状態はブラウザに保存されます)。
 3. ノードや term-point をクリックすると、support のトレースと属性が表示されます。ダブルクリックで term-point を展開します。
-4. ツールバーで、レイアウトの切替、Trace の方向、Dependency view の表示を切り替えます。
+4. ツールバーで、レイアウトの切替、レイヤの並べ方 (縦 1 列 / 格子)、Trace の方向、Dependency view の表示を切り替えます。
+5. 配置にかかった時間・ノード数などの統計、schematic のパネル、依存関係の問題の一覧は、各画面 (図) の下に表示されます。図の大きさは変わりません (情報の分だけ、ページが下に伸びます)。
 
 ### URL で状態を指定する
 
 表示の状態は、URL のクエリで指定でき、リンクで共有できます (ID は URL エンコードします)。
 
 ```
-/netoviz2/<network>/<snapshot>?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1
+/netoviz2/<network>/<snapshot>?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&layerlayout=<column|grid>&profile=<名前>&dependency=1
 ```
 
-| クエリ       | 内容                                                |
-| ------------ | --------------------------------------------------- |
-| `layers`     | 表示するレイヤ                                      |
-| `sel`        | 選択するオブジェクト                                |
-| `layout`     | レイアウト: `stress` (既定) / `force` / `schematic` |
-| `profile`    | schematic のプロファイルの名前                      |
-| `dependency` | `1` で依存関係の副画面を表示                        |
+| クエリ        | 内容                                                               |
+| ------------- | ------------------------------------------------------------------ |
+| `layers`      | 表示するレイヤ                                                     |
+| `sel`         | 選択するオブジェクト                                               |
+| `layout`      | レイアウト: `stress` (既定) / `force` / `schematic`                |
+| `layerlayout` | レイヤの並べ方: `column` (既定。縦 1 列、中央揃え) / `grid` (格子) |
+| `profile`     | schematic のプロファイルの名前                                     |
+| `dependency`  | `1` で依存関係の副画面を表示                                       |
 
 ### schematic レイアウト
 

@@ -457,6 +457,75 @@ describe('ForceRenderer', () => {
       expect(layout).toHaveBeenCalledTimes(2)
     })
 
+    describe('ports', () => {
+      const two = (links: number): DisplayGraph => {
+        const node = (id: string, layer = 'l1') => ({
+          id,
+          name: id,
+          layer,
+          type: 'node' as const,
+          expanded: true,
+          tpCount: links,
+        })
+        const tp = (id: string, parent: string) => ({
+          id,
+          name: id,
+          layer: 'l1',
+          type: 'tp' as const,
+          parent,
+        })
+        const nodes: DisplayGraph['nodes'] = [node('l1/a'), node('l1/b')]
+        const edges: DisplayGraph['links'] = []
+        for (let i = 0; i < links; i++) {
+          nodes.push(tp(`l1/a/p${i}`, 'l1/a'), tp(`l1/b/p${i}`, 'l1/b'))
+          edges.push({ id: `k${i}`, source: `l1/a/p${i}`, target: `l1/b/p${i}`, type: 'link', count: 1 })
+        }
+        return { nodes, links: edges }
+      }
+      const portPos = (id: string) => pos(id)
+
+      it('puts the ports of the only link on the line between the centers of the nodes', async () => {
+        renderer.destroy()
+        renderer = new ForceRenderer(svg, callbacks, {
+          multiStart: 1,
+          engine: 'stress',
+          stressLayout: lineLayout(),
+        })
+        renderer.setGraph(two(1), ['l1'])
+        await flush()
+        const [a, b] = [pos('l1/a'), pos('l1/b')]
+        const [pa, pb] = [portPos('l1/a/p0'), portPos('l1/b/p0')]
+        const angle = Math.atan2(b[1] - a[1], b[0] - a[0])
+        const [da, db] = [Math.atan2(pa[1] - a[1], pa[0] - a[0]), Math.atan2(pb[1] - b[1], pb[0] - b[0])]
+        expect(Math.cos(da - angle)).toBeCloseTo(1, 3)
+        expect(Math.cos(db - (angle + Math.PI))).toBeCloseTo(1, 3)
+      })
+
+      it('puts the ports of the links between the same nodes side by side so that the links are parallel', async () => {
+        renderer.destroy()
+        renderer = new ForceRenderer(svg, callbacks, {
+          multiStart: 1,
+          engine: 'stress',
+          stressLayout: lineLayout(),
+        })
+        renderer.setGraph(two(3), ['l1'])
+        await flush()
+        const [a, b] = [pos('l1/a'), pos('l1/b')]
+        const length = Math.hypot(b[0] - a[0], b[1] - a[1])
+        const normal = [-(b[1] - a[1]) / length, (b[0] - a[0]) / length]
+        // the distance of each link from the line between the centers, at both ends
+        const side = (id: string, origin: [number, number]) => {
+          const p = portPos(id)
+          return (p[0] - origin[0]) * (normal[0] ?? 0) + (p[1] - origin[1]) * (normal[1] ?? 0)
+        }
+        const sides = [0, 1, 2].map((i) => [side(`l1/a/p${i}`, a), side(`l1/b/p${i}`, b)] as const)
+        for (const [sa, sb] of sides) expect(sa).toBeCloseTo(sb, 3) // (parallel)
+        const offsets = sides.map(([sa]) => sa).sort((x, y) => x - y)
+        expect(offsets[1]! - offsets[0]!).toBeGreaterThanOrEqual(13)
+        expect(offsets[2]! - offsets[1]!).toBeGreaterThanOrEqual(13)
+      })
+    })
+
     describe('schematic engine', () => {
       const lineSchematic = () =>
         vi.fn<SchematicLayerFn>((input) =>
@@ -495,6 +564,51 @@ describe('ForceRenderer', () => {
         expect(stress).not.toHaveBeenCalled()
         expect(layout.mock.calls.map((call) => call[0].layer)).toEqual(['l1', 'l2'])
         expect(pos('l1/b')[0] - pos('l1/a')[0]).toBeCloseTo(100, 3)
+      })
+
+      describe('moving a node by hand', () => {
+        type Manual = {
+          bodies: Array<{ id: string; x: number; y: number }>
+          startManualMove(d: unknown): void
+          manualMove(d: unknown, x: number, y: number, mouse?: Partial<MouseEvent>): void
+        }
+        const drag = async (key: Partial<MouseEvent>, dx: number, dy: number) => {
+          makeSchematic(lineSchematic()).setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          const internals = renderer as unknown as Manual
+          const a = internals.bodies.find((b) => b.id === 'l1/a')!
+          const before = { a: pos('l1/a'), b: pos('l1/b') }
+          internals.startManualMove(a)
+          internals.manualMove(a, a.x + dx, a.y + dy, key)
+          return { before, after: { a: pos('l1/a'), b: pos('l1/b') } }
+        }
+
+        it('marks the nodes a drag moves while Shift is held on the node under the pointer', async () => {
+          makeSchematic(lineSchematic()).setGraph(collapsed, ['l1', 'l2'])
+          await flush()
+          const marked = () =>
+            [...svg.querySelectorAll('g.node.will-move')].map((n) => n.getAttribute('data-id'))
+          nodeEl('l1/a').dispatchEvent(new MouseEvent('mouseenter'))
+          expect(marked()).toEqual([])
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true }))
+          expect(marked().sort()).toEqual(['l1/a', 'l1/b'])
+          window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }))
+          expect(marked()).toEqual([])
+        })
+
+        it('moves only the node, rounded to the grid, without the simulation', async () => {
+          const { before, after } = await drag({}, 24, 12)
+          expect(after.a).toEqual([before.a[0] + 20, before.a[1] + 20])
+          expect(after.b).toEqual(before.b)
+        })
+
+        it('moves the nodes in the row with the shift key, and the nodes in the column with the control key', async () => {
+          const row = await drag({ shiftKey: true }, 20, 0)
+          expect(row.after.a[0] - row.before.a[0]).toBe(20)
+          expect(row.after.b[0] - row.before.b[0]).toBe(20) // (a and b are in the same row)
+          const column = await drag({ ctrlKey: true }, 20, 0)
+          expect(column.after.b).toEqual(column.before.b) // (b is not in the column of a)
+        })
       })
 
       it('passes the names of the nodes and the links in the layer', async () => {

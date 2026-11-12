@@ -99,6 +99,7 @@ async function copy(report: SchematicReport): Promise<void> {
   flex-direction: column;
   gap: 0.15rem;
   margin-bottom: 0.25rem;
+  flex-shrink: 0;
   font-size: 0.8em;
 }
 .schematic-report .report {

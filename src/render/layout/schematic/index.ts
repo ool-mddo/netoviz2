@@ -46,6 +46,10 @@ function violationsOf(
 interface Arranged {
   positions: Positions
   annotated: Annotated
+  /** The nodes which are put between the devices (connection points) */
+  connectorIds?: ReadonlySet<string>
+  /** Device => the node of the base layer it follows */
+  follows?: ReadonlyMap<string, string>
   source: SchematicReport['source']
   base?: string
   draft?: string
@@ -117,7 +121,7 @@ function arrangeByProfile(
   links: readonly Link[],
   profile: DiagramProfile,
   withConnectionPoints = false,
-): Pick<Arranged, 'positions' | 'annotated'> | undefined {
+): (Pick<Arranged, 'positions' | 'annotated'> & { connectors: ReadonlySet<string> }) | undefined {
   const annotated = annotate(nodes, profile)
   if (annotated.unclassified.length >= nodes.length) return undefined
   const unclassified = new Set(annotated.unclassified)
@@ -142,10 +146,12 @@ function arrangeByProfile(
   return {
     annotated: { ...annotated, unclassified: annotated.unclassified.filter((id) => !connectorIds.has(id)) },
     positions,
+    connectors: connectorIds,
   }
 }
 
-type BaseArrangement = Pick<Arranged, 'positions' | 'annotated'> | undefined
+type BaseArrangement =
+  (Pick<Arranged, 'positions' | 'annotated'> & { connectors?: ReadonlySet<string> }) | undefined
 /** Arrangements of the base layers (the array of the nodes of a base layer is not changed until it is loaded again) */
 const baseCache = new WeakMap<
   object,
@@ -160,7 +166,9 @@ function arrangeBase(base: SchematicBase): BaseArrangement {
   const cached = baseCache.get(base.nodes)
   if (cached && cached.links === base.links && cached.profile === base.profile) return cached.arranged
   const profile = base.profile ?? inferProfile(base.nodes, base.links)?.profile
-  const arranged = profile && arrangeByProfile(base.nodes, base.links, profile)
+  // With a given profile, the nodes it leaves without a tier but which join devices (e.g. L3 segments) are connection
+  // points, as when the layer is arranged by the profile itself: the layers above inherit that (see inheritAnnotations).
+  const arranged = profile && arrangeByProfile(base.nodes, base.links, profile, base.profile !== undefined)
   baseCache.set(base.nodes, {
     links: base.links,
     ...(base.profile ? { profile: base.profile } : {}),
@@ -170,7 +178,7 @@ function arrangeBase(base: SchematicBase): BaseArrangement {
 }
 
 /** Gap between the devices in a row (a connection point is put between them) */
-const DEVICE_GAP = 70
+const DEVICE_GAP = 100
 
 /**
  * The layer inherits the arrangement of the base layer (through the supports): the devices (the nodes supported by one
@@ -185,10 +193,15 @@ function arrangeByInheritance(
 ): Arranged | undefined {
   const arranged = arrangeBase(base)
   if (!arranged) return undefined
-  const { annotated, devices, connectors, hints, unclassifiedRow } = inheritAnnotations(nodes, base.lowerOf, {
-    annotations: arranged.annotated.annotations,
-    positions: arranged.positions,
-  })
+  const { annotated, devices, connectors, hints, unclassifiedRow, follows } = inheritAnnotations(
+    nodes,
+    base.lowerOf,
+    {
+      annotations: arranged.annotated.annotations,
+      positions: arranged.positions,
+      ...(arranged.connectors ? { connectors: arranged.connectors } : {}),
+    },
+  )
   // the base layer does not fit this layer: it classifies few devices (or all the nodes are connection points)
   if (devices.length === 0 || annotated.unclassified.length * 2 > devices.length) return undefined
   // the order of the devices is the one of the base layer (the hints; no links are given: it is not changed)
@@ -200,7 +213,14 @@ function arrangeByInheritance(
     pairGap: DEVICE_GAP,
   })
   const positions = addConnectionPoints(placed, connectors, links, radiusOf(nodes))
-  return { positions, annotated, source: 'inherited', base: base.layer }
+  return {
+    positions,
+    annotated,
+    connectorIds: new Set(connectors.map((node) => node.id)),
+    follows,
+    source: 'inherited',
+    base: base.layer,
+  }
 }
 
 /**
@@ -222,7 +242,7 @@ export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> 
   if (profile && inheritFrom === undefined) {
     attempts.push(() => {
       const arranged = arrangeByProfile(nodes, links, profile, bases.length === 0)
-      return arranged && { ...arranged, source: 'profile' }
+      return arranged && { ...arranged, connectorIds: arranged.connectors, source: 'profile' }
     })
   }
   // the lower layer which the profile names comes first; the others in the given order (the lowest layer first)
@@ -234,7 +254,7 @@ export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> 
   if (profile && inheritFrom !== undefined) {
     attempts.push(() => {
       const arranged = arrangeByProfile(nodes, links, profile, bases.length === 0)
-      return arranged && { ...arranged, source: 'profile' }
+      return arranged && { ...arranged, connectorIds: arranged.connectors, source: 'profile' }
     })
   }
   attempts.push(() => {
@@ -252,6 +272,12 @@ export function layoutSchematic(input: SchematicLayerInput): Promise<Positions> 
       violations: violationsOf(nodes, arranged.annotated, arranged.source),
       ...(arranged.base === undefined ? {} : { base: arranged.base }),
       ...(arranged.draft === undefined ? {} : { draft: arranged.draft }),
+    })
+    input.structure?.({
+      layer,
+      connectors: nodes.filter((node) => arranged.connectorIds?.has(node.id)),
+      links,
+      follows: arranged.follows ?? new Map(),
     })
     return Promise.resolve(arranged.positions)
   }

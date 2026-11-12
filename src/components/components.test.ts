@@ -47,6 +47,19 @@ describe('LayerList', () => {
   })
 })
 
+describe('LayerList: collapsed', () => {
+  it('shows only the dots of the layers, which toggle the layers', async () => {
+    const wrapper = mount(LayerList, {
+      props: { layers: makeSummary().layers, visible: ['layer2'], collapsed: true },
+    })
+    expect(wrapper.find('[data-testid=select-all]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid=dot-layer2]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid=dot-layer1]').attributes('aria-pressed')).toBe('false')
+    await wrapper.get('[data-testid=dot-layer1]').trigger('click')
+    expect(wrapper.emitted('toggle')?.[0]).toEqual(['layer1'])
+  })
+})
+
 describe('SummaryBar network link', () => {
   it('links the network name to the snapshot list of the network', () => {
     const wrapper = mount(SummaryBar, { props: { summary: makeSummary() }, global: { plugins: [router] } })

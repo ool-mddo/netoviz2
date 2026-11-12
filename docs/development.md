@@ -39,7 +39,7 @@ NETOVIZ2_API_URL=http://<host>:15000 npm run dev
 - 表示の例 (`<network>` / `<snapshot>` は `http://localhost:15000/topologies/index` で確認できる):
   - 一覧: `http://localhost:5173/netoviz2/`
   - トポロジ: `http://localhost:5173/netoviz2/<network>/<snapshot>`
-  - 状態は URL で指定できる (ID は URL エンコードする): `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&profile=<名前>&dependency=1`
+  - 状態は URL で指定できる (ID は URL エンコードする): `?layers=<レイヤ ID,...>&sel=<オブジェクト ID>&layout=<stress|force|schematic>&layerlayout=<column|grid>&profile=<名前>&dependency=1`
 
 ### 2. 手元のソースでコンテナを作って確認する
 

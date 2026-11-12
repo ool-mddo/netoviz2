@@ -67,6 +67,8 @@ export function lowerNodesIn(
 export interface BaseArrangement {
   annotations: ReadonlyMap<string, NodeAnnotation>
   positions: Positions
+  /** Nodes of the base layer which are connection points (not devices): the nodes they support are connection points */
+  connectors?: ReadonlySet<string>
 }
 
 export interface Inherited {
@@ -79,6 +81,8 @@ export interface Inherited {
   hints: Map<string, number>
   /** Row for the devices which got no tier (after the last row) */
   unclassifiedRow: number
+  /** For each device supported by one node of the base layer, that node (the device follows it) */
+  follows: Map<string, string>
 }
 
 /**
@@ -100,6 +104,7 @@ export function inheritAnnotations(
   const devices: SchematicNode[] = []
   const connectors: SchematicNode[] = []
   const unclassified: string[] = []
+  const follows = new Map<string, string>()
   // how many nodes of the layer are supported by only the same node of the base layer (e.g. the interfaces of a device)
   const sameSupporter = new Map<string, number>()
   for (const node of nodes) {
@@ -110,6 +115,12 @@ export function inheritAnnotations(
   }
 
   for (const node of nodes) {
+    // a node supported only by connection points of the base layer (e.g. an L3 segment) is a connection point as well
+    const lowers = lowerOf.get(node.id) ?? []
+    if (lowers.length > 0 && base.connectors && lowers.every((id) => base.connectors?.has(id))) {
+      connectors.push(node)
+      continue
+    }
     const supporters = [...new Set(lowerOf.get(node.id) ?? [])].filter(
       (id) => base.annotations.get(id)?.tierIndex !== undefined,
     )
@@ -125,6 +136,7 @@ export function inheritAnnotations(
       unclassified.push(node.id)
       continue
     }
+    if (supporters[0] !== undefined) follows.set(node.id, supporters[0])
     annotation.tier = info.tier
     annotation.tierIndex = info.tierIndex
     if (info.group !== undefined) annotation.group = info.group
@@ -148,5 +160,6 @@ export function inheritAnnotations(
     connectors,
     hints,
     unclassifiedRow,
+    follows,
   }
 }

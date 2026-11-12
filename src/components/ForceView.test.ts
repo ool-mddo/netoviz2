@@ -198,6 +198,14 @@ describe('ForceView', () => {
       expect(wrapper.get('[data-testid=layout-stats]').attributes('data-engine')).toBe('force')
     })
 
+    it('tells how to move a row / a column only for the schematic layout', async () => {
+      const { wrapper } = await mountView()
+      current = wrapper
+      expect(wrapper.find('[data-testid=drag-hint]').exists()).toBe(false)
+      await wrapper.setProps({ engine: 'schematic' })
+      expect(wrapper.get('[data-testid=drag-hint]').text()).toMatch(/Shift\+drag.*row.*Ctrl.*column/)
+    })
+
     it('arranges again with the new engine when the engine is changed', async () => {
       const { wrapper } = await mountView()
       current = wrapper

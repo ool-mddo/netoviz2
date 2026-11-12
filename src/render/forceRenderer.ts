@@ -14,7 +14,7 @@ import { select, type Selection } from 'd3-selection'
 import { zoom, zoomIdentity, type ZoomBehavior } from 'd3-zoom'
 import type { DisplayGraph, DisplayLink, DisplayNode } from '../domain/graph'
 import { countCrossings, overlapDepth, type Segment } from '../domain/layoutScore'
-import { radiusForPorts, spreadAngles } from '../domain/ports'
+import { placeAngles, radiusForPorts, type PortSpec } from '../domain/ports'
 import { layoutWithStress } from './layout/stress'
 import { packBoxes } from './layout/pack'
 import { layoutQuality } from './layout/quality'
@@ -22,13 +22,16 @@ import { layoutSchematic } from './layout/schematic'
 import { routeAround, type Obstacle, type RouteEnd, type RouteRequest } from './linkRouter'
 import { roundedPolyline } from './path'
 import { selectProfile } from './layout/schematic/profile'
+import { movingNodes, moveNodes, snapDelta, type MoveScope } from './layout/schematic/move'
 import type {
   DiagramProfile,
   SchematicBase,
   SchematicLayerFn,
   SchematicReport,
+  SchematicStructure,
 } from './layout/schematic/types'
 import {
+  type LayerArrangement,
   type LayerLayoutFn,
   type LayoutEngine,
   type LayoutStats,
@@ -62,6 +65,8 @@ export function layerColor(layer: string, layerOrder: readonly string[]): string
  * pulled back to where they were (so that the layout changes gently and mostly near the dragged node)
  */
 const DRAG_ALPHA = 0.1
+/** (schematic layout) the movement of a dragged node is rounded to this grid (the movement, so the rows stay aligned) */
+const SCHEMATIC_GRID = 20
 const DRAG_ANCHOR_STRENGTH = 0.12
 const DRAG_CHARGE_SCALE = 0.3
 const DRAG_VELOCITY_DECAY = 0.6
@@ -73,6 +78,8 @@ const ROUTE_BUDGET_MS = 6
 const PORT_RADIUS = 4.5
 /** Length of the arc of a node circle reserved for a port */
 const PORT_ARC = 14
+/** The links side by side between two nodes are within this part of the radius from the line between the centers */
+const PARALLEL_SPAN = 0.85
 /** Space around a node kept by the layout (for labels and links) */
 const NODE_MARGIN = 20
 const LAYER_SPACING_X = 800
@@ -122,6 +129,8 @@ export interface RendererOptions {
   multiStart?: number
   /** Layout engine (default: force) */
   engine?: LayoutEngine
+  /** Arrangement of the layers: in a grid or in a single column (default: grid) */
+  layerArrangement?: LayerArrangement
   /** Function to arrange with the own stress layout (default: layoutWithStress) */
   stressLayout?: LayerLayoutFn
   /** Function to arrange with the schematic layout (default: layoutSchematic) */
@@ -165,6 +174,7 @@ export class ForceRenderer {
   private readonly zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>
   private readonly multiStart: number
   private engine: LayoutEngine
+  private layerArrangement: LayerArrangement
   private readonly stressLayout: LayerLayoutFn
   private readonly schematicLayout: SchematicLayerFn
   private profiles: readonly DiagramProfile[]
@@ -203,6 +213,12 @@ export class ForceRenderer {
   private portsOf = new Map<string, Item[]>()
   /** ID of the port => IDs of the nodes connected to the port */
   private peersOf = new Map<string, Set<string>>()
+  /**
+   * ID of the port => how far its link is from the line between the centers of the nodes (the same on both nodes: the
+   * links between the same two nodes are parallel). Only for the ports of the links which are more than one between
+   * the same nodes.
+   */
+  private portOffsets = new Map<string, number>()
   private readonly positions = new Map<string, { x: number; y: number }>()
   /** ID of the port => angle on the circle of its node, set by the user dragging the port */
   private readonly pinnedAngles = new Map<string, number>()
@@ -213,6 +229,14 @@ export class ForceRenderer {
   /** Element under the pointer (shown with its links) */
   private hoverId: string | null = null
   private userMoved = false
+  /** (schematic layout) how the nodes of each layer were arranged, to move them by hand (by the layer) */
+  private structures = new Map<string, SchematicStructure>()
+  /** (schematic layout) connection points which the user moved by hand: they are not put between the devices again */
+  private readonly pinnedConnectors = new Set<string>()
+  /** (schematic layout) the modifier keys held now (they decide what a drag moves: see manualMove) */
+  private keys = { shift: false, ctrl: false }
+  /** (schematic layout) the node being dragged by hand */
+  private draggedId: string | null = null
   /** Weakens the repulsion while the layout follows a dragged node (stress layout) */
   private chargeScale = 1
   /** positions the nodes are pulled back to (only while the layout follows a dragged node) */
@@ -226,6 +250,7 @@ export class ForceRenderer {
   ) {
     this.multiStart = options.multiStart ?? DEFAULT_MULTISTART
     this.engine = options.engine ?? 'force'
+    this.layerArrangement = options.layerArrangement ?? 'grid'
     this.stressLayout =
       options.stressLayout ?? ((nodes, links) => Promise.resolve(layoutWithStress(nodes, links)))
     this.schematicLayout = options.schematicLayout ?? layoutSchematic
@@ -249,6 +274,9 @@ export class ForceRenderer {
       })
     svgSelection.call(this.zoomBehavior).on('dblclick.zoom', null)
     svgSelection.on('click.background', () => this.callbacks.onSelect(null))
+    window.addEventListener('keydown', this.onKey)
+    window.addEventListener('keyup', this.onKey)
+    window.addEventListener('blur', this.onBlur)
 
     this.simulation = forceSimulation<Item, SimLink>()
       .force(
@@ -313,6 +341,18 @@ export class ForceRenderer {
     this.relayout()
   }
 
+  /** Change the arrangement of the layers: all the nodes are arranged again */
+  setLayerArrangement(arrangement: LayerArrangement): void {
+    if (arrangement === this.layerArrangement) return
+    this.layerArrangement = arrangement
+    this.relayout()
+  }
+
+  /** Number of the columns of the layers (undefined: nearly square, by the number of the layers) */
+  private layerColumns(): number | undefined {
+    return this.layerArrangement === 'column' ? 1 : undefined
+  }
+
   /** Change the diagram profiles (the schematic layout is made again with them) */
   setProfiles(profiles: readonly DiagramProfile[]): void {
     // nothing changes without profiles (and a relayout forgets the positions the user moved)
@@ -335,6 +375,7 @@ export class ForceRenderer {
   relayout(): void {
     this.positions.clear()
     this.pinnedAngles.clear()
+    this.pinnedConnectors.clear()
     this.bodies = []
     this.appliedSignature = ''
     this.userMoved = false
@@ -383,6 +424,9 @@ export class ForceRenderer {
     this.simulation.stop()
     if (this.routeTimer) clearTimeout(this.routeTimer)
     this.routeTimer = null
+    window.removeEventListener('keydown', this.onKey)
+    window.removeEventListener('keyup', this.onKey)
+    window.removeEventListener('blur', this.onBlur)
     const svgSelection = select(this.svg)
     svgSelection.on('.zoom', null).on('click.background', null)
     this.svg.classList.remove('zoomed-in')
@@ -393,7 +437,7 @@ export class ForceRenderer {
 
   private layerCenter(layer: string): { x: number; y: number } {
     const index = this.areaIndex.get(layer) ?? 0
-    const columns = Math.max(1, Math.ceil(Math.sqrt(this.areaIndex.size)))
+    const columns = Math.max(1, this.layerColumns() ?? Math.ceil(Math.sqrt(this.areaIndex.size)))
     return { x: (index % columns) * LAYER_SPACING_X, y: Math.floor(index / columns) * LAYER_SPACING_Y }
   }
 
@@ -407,11 +451,26 @@ export class ForceRenderer {
       if (node.type === 'tp' && node.parent)
         portCounts.set(node.parent, (portCounts.get(node.parent) ?? 0) + 1)
     }
+    // the links between the same nodes are side by side: the node is large enough for the most of them
+    const parentOf = new Map(graph.nodes.map((node) => [node.id, node.parent]))
+    const parallel = new Map<string, number>()
+    const sameNodes = new Map<string, number>()
+    for (const link of graph.links) {
+      const [a, b] = [parentOf.get(link.source), parentOf.get(link.target)]
+      if (link.type !== 'link' || !a || !b || a === b) continue
+      const key = a < b ? `${a}\n${b}` : `${b}\n${a}`
+      const count = (sameNodes.get(key) ?? 0) + 1
+      sameNodes.set(key, count)
+      for (const node of [a, b]) parallel.set(node, Math.max(parallel.get(node) ?? 0, count))
+    }
     const items = graph.nodes.map((node): Item => {
       if (node.type === 'tp') return { ...node, radius: PORT_RADIUS }
       const ports = portCounts.get(node.id) ?? 0
       const collapsed = NODE_RADIUS + Math.min(6, Math.log2((node.tpCount ?? 0) + 1))
-      return { ...node, radius: ports > 0 ? radiusForPorts(NODE_RADIUS, ports, PORT_ARC) : collapsed }
+      if (ports === 0) return { ...node, radius: collapsed }
+      // (the outer links of n links side by side are at most PARALLEL_SPAN of the radius from the center line)
+      const side = (((parallel.get(node.id) ?? 1) - 1) * PORT_ARC) / (2 * PARALLEL_SPAN)
+      return { ...node, radius: Math.max(radiusForPorts(NODE_RADIUS, ports, PORT_ARC), side) }
     })
     this.bodies = items.filter((item) => item.type === 'node')
     this.ports = items.filter((item) => item.type === 'tp')
@@ -439,6 +498,42 @@ export class ForceRenderer {
       else bundles.set(key, { source: a, target: b, count: link.count })
     }
     this.simLinks = [...bundles.values()]
+    this.portOffsets = this.parallelOffsets(nodeOf)
+  }
+
+  /**
+   * The links between the same two nodes (term-points of both) are put side by side, PORT_ARC apart, on both sides of
+   * the line between the centers. The port of the node which comes first in the order of the IDs gets the offset, and the
+   * port of the other node the opposite one, so that the links are parallel.
+   */
+  private parallelOffsets(nodeOf: (id: string) => string): Map<string, number> {
+    const isPort = (id: string) => this.itemById.get(id)?.type === 'tp'
+    const linkCount = new Map<string, number>()
+    for (const link of this.drawLinks) {
+      for (const end of [link.source, link.target]) linkCount.set(end, (linkCount.get(end) ?? 0) + 1)
+    }
+    const pairs = new Map<string, DisplayLink[]>()
+    for (const link of this.drawLinks) {
+      if (!isPort(link.source) || !isPort(link.target)) continue
+      const [a, b] = [nodeOf(link.source), nodeOf(link.target)]
+      if (a === b) continue
+      const key = a < b ? `${a}\n${b}` : `${b}\n${a}`
+      pairs.set(key, [...(pairs.get(key) ?? []), link])
+    }
+    const offsets = new Map<string, number>()
+    for (const links of pairs.values()) {
+      if (links.length < 2) continue
+      links.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+      links.forEach((link, k) => {
+        const offset = (k - (links.length - 1) / 2) * PORT_ARC
+        const [first, second] =
+          nodeOf(link.source) < nodeOf(link.target) ? [link.source, link.target] : [link.target, link.source]
+        // (a port which has more than one link is not put aside: it is toward the nodes it is linked to)
+        if (linkCount.get(first) === 1) offsets.set(first, offset)
+        if (linkCount.get(second) === 1) offsets.set(second, -offset)
+      })
+    }
+    return offsets
   }
 
   private addPeer(portId: string, peerNode: string): void {
@@ -510,6 +605,9 @@ export class ForceRenderer {
           report: (report) => {
             if (token === this.layoutToken) this.onSchematicReport(report)
           },
+          structure: (structure) => {
+            if (token === this.layoutToken) this.structures.set(structure.layer, structure)
+          },
           ...(profile ? { profile } : {}),
         })
       }
@@ -522,7 +620,7 @@ export class ForceRenderer {
     const links = this.simLinks.map(
       (link) => `${this.itemOf(link.source)?.id}>${this.itemOf(link.target)?.id}`,
     )
-    return `${this.engine}|${this.engine === 'schematic' ? this.basesVersion : 0}|${nodes}|${links.join(',')}`
+    return `${this.engine}|${this.layerArrangement}|${this.engine === 'schematic' ? this.basesVersion : 0}|${nodes}|${links.join(',')}`
   }
 
   /** Arrange the nodes of each layer by the engine and put the layouts of the layers in a grid */
@@ -532,6 +630,7 @@ export class ForceRenderer {
     started: number,
     signature: string,
   ): Promise<void> {
+    this.structures = new Map()
     const byLayer = new Map<string, Item[]>()
     for (const body of this.bodies) byLayer.set(body.layer, [...(byLayer.get(body.layer) ?? []), body])
     const layers = [...byLayer].sort(
@@ -558,7 +657,12 @@ export class ForceRenderer {
       const [minX, minY] = [Math.min(...xs), Math.min(...ys)]
       return { key: layer, width: Math.max(...xe) - minX, height: Math.max(...ye) - minY, minX, minY }
     })
-    const offsets = packBoxes(extents, LAYER_GAP)
+    const offsets = packBoxes(
+      extents,
+      LAYER_GAP,
+      this.layerColumns(),
+      this.layerArrangement === 'column' ? 'center' : 'start',
+    )
     for (const { layer, items, positions } of results) {
       const [offset, extent] = [offsets.get(layer), extents.find((e) => e.key === layer)]
       for (const item of items) {
@@ -681,13 +785,20 @@ export class ForceRenderer {
       const node = this.itemById.get(parentId)
       if (!node) continue
       const [cx, cy] = [node.x ?? 0, node.y ?? 0]
-      const desired = ports.map(
-        (port) => this.portHints.get(port.id) ?? this.desiredAngle(node, port, center),
-      )
-      const angles = spreadAngles(desired, PORT_ARC / node.radius)
+      // The priority: the port the user moved, the ports of straight links (toward the node they are linked to, side by
+      // side if there are more links between the nodes), and then the others (the ports of the links which go around
+      // something, toward where the route leaves; the ports without a link), which take a free place.
+      const specs = ports.map((port): PortSpec => {
+        const pinned = this.pinnedAngles.get(port.id)
+        if (pinned !== undefined) return { desired: pinned, kind: 'pinned' }
+        const hint = this.portHints.get(port.id)
+        if (hint !== undefined) return { desired: hint, kind: 'loose' }
+        const linked = (this.peersOf.get(port.id)?.size ?? 0) > 0
+        return { desired: this.desiredAngle(node, port, center), kind: linked ? 'straight' : 'loose' }
+      })
+      const angles = placeAngles(specs, PORT_ARC / node.radius)
       ports.forEach((port, i) => {
-        // a port moved by the user keeps its angle
-        const angle = this.pinnedAngles.get(port.id) ?? angles[i] ?? 0
+        const angle = angles[i] ?? 0
         port.angle = angle
         port.x = cx + node.radius * Math.cos(angle)
         port.y = cy + node.radius * Math.sin(angle)
@@ -719,7 +830,10 @@ export class ForceRenderer {
       dx = (node.x ?? 0) - center.x
       dy = (node.y ?? 0) - center.y
     }
-    return Math.atan2(dy, dx)
+    // the links between the same nodes are side by side: the port is aside the line between the centers
+    const offset = this.portOffsets.get(port.id)
+    const aside = offset === undefined ? 0 : Math.asin(Math.max(-1, Math.min(1, offset / node.radius)))
+    return Math.atan2(dy, dx) + aside
   }
 
   // --- drawing
@@ -780,7 +894,13 @@ export class ForceRenderer {
       .filter((d) => d.type === 'node')
       .call(
         drag<SVGGElement, Item>()
+          // (Ctrl + drag moves a column in the schematic layout)
+          .filter((event: MouseEvent) => !event.button && (this.engine === 'schematic' || !event.ctrlKey))
           .on('start', (event, d) => {
+            if (this.engine === 'schematic') {
+              this.startManualMove(d)
+              return
+            }
             // also in the other engines, the other nodes follow the dragged node (force simulation)
             this.holdLayout(true)
             if (!event.active)
@@ -792,10 +912,20 @@ export class ForceRenderer {
           })
           .on('drag', (event, d) => {
             this.userMoved = true
+            if (this.engine === 'schematic') {
+              this.manualMove(d, event.x, event.y, event.sourceEvent as MouseEvent | undefined)
+              return
+            }
             d.fx = event.x
             d.fy = event.y
           })
           .on('end', (event, d) => {
+            if (this.engine === 'schematic') {
+              this.manualFrom = null
+              this.draggedId = null
+              this.showWillMove()
+              return
+            }
             if (!event.active) this.simulation.alphaTarget(0)
             d.fx = null
             d.fy = null
@@ -809,6 +939,52 @@ export class ForceRenderer {
       .attr('text-anchor', 'middle')
       .attr('dy', (d) => (d.type === 'node' ? d.radius + 12 : 0))
       .text((d) => d.name)
+  }
+
+  /** (schematic layout) positions of the nodes and of the dragged node when a drag started */
+  private manualFrom: { positions: Map<string, Position>; start: Position } | null = null
+
+  private startManualMove(d: Item): void {
+    this.simulation.stop() // (the layout is not moved by the simulation: the nodes are only where they are put)
+    this.draggedId = d.id
+    this.manualFrom = {
+      positions: new Map(this.bodies.map((b) => [b.id, { x: b.x ?? 0, y: b.y ?? 0 }])),
+      start: { x: d.x ?? 0, y: d.y ?? 0 },
+    }
+  }
+
+  /**
+   * (schematic layout) Move the dragged node by hand, rounded to the grid. Shift: the nodes in the row, Ctrl / Meta:
+   * the nodes in the column. The devices which follow it in the other layers move with it, and the connection points
+   * are put between the devices again. (The others are not moved: the layout is not moved by the simulation.)
+   */
+  private manualMove(d: Item, x: number, y: number, mouse?: MouseEvent): void {
+    const from = this.manualFrom
+    if (!from) return
+    const scope = this.scopeOf(mouse?.shiftKey ?? false, (mouse?.ctrlKey || mouse?.metaKey) ?? false)
+    this.keys = { shift: scope === 'row', ctrl: scope === 'column' }
+    this.showWillMove()
+    const delta = snapDelta({ x: x - from.start.x, y: y - from.start.y }, SCHEMATIC_GRID)
+    const isConnector = this.structures.get(d.layer)?.connectors.some((c) => c.id === d.id) ?? false
+    if (isConnector) this.pinnedConnectors.add(d.id)
+    const moved = moveNodes({
+      id: d.id,
+      scope,
+      from: from.positions,
+      delta,
+      structures: this.structures,
+      layerOf: (id) => this.itemById.get(id)?.layer,
+      radiusOf: (id) => this.radiusOf(id),
+      pinned: this.pinnedConnectors,
+    })
+    // the nodes which were moved before in this drag but not now (e.g. the key is released) go back
+    for (const body of this.bodies) {
+      const [origin, p] = [from.positions.get(body.id), moved.get(body.id)]
+      if (p) Object.assign(body, { x: p.x, y: p.y, vx: 0, vy: 0 })
+      else if (origin) Object.assign(body, { x: origin.x, y: origin.y, vx: 0, vy: 0 })
+    }
+    this.placePorts()
+    this.draw()
   }
 
   /**
@@ -859,6 +1035,55 @@ export class ForceRenderer {
   private setHover(id: string | null): void {
     this.hoverId = id
     this.applyHover()
+    this.showWillMove()
+  }
+
+  private readonly onKey = (event: KeyboardEvent): void => {
+    this.setKeys(event.shiftKey, event.ctrlKey || event.metaKey)
+  }
+
+  private readonly onBlur = (): void => this.setKeys(false, false)
+
+  private setKeys(shift: boolean, ctrl: boolean): void {
+    if (shift === this.keys.shift && ctrl === this.keys.ctrl) return
+    this.keys = { shift, ctrl }
+    this.showWillMove()
+  }
+
+  /** What a drag moves: the node, its row (Shift) or its column (Ctrl / Meta) */
+  private scopeOf(shift: boolean, ctrl: boolean): MoveScope {
+    return shift ? 'row' : ctrl ? 'column' : 'node'
+  }
+
+  /**
+   * (schematic layout) Mark the nodes which a drag moves with the modifier keys held now (`will-move`: the nodes of the
+   * row / column of the layer, `will-follow`: the nodes of the other layers which move with them), for the node under
+   * the pointer or the node being dragged. Nothing is marked without a key (a drag moves only the node).
+   */
+  private showWillMove(): void {
+    let marked = new Map<string, boolean>() // ID => in the layer of the node
+    const scope = this.scopeOf(this.keys.shift, this.keys.ctrl)
+    const hovered = this.hoverId === null ? undefined : this.itemById.get(this.hoverId)
+    const target = this.draggedId ?? (hovered?.type === 'tp' ? hovered.parent : hovered?.id)
+    const layer = target === undefined || target === null ? undefined : this.itemById.get(target)?.layer
+    if (this.engine === 'schematic' && scope !== 'node' && target && layer !== undefined) {
+      const from =
+        this.manualFrom?.positions ?? new Map(this.bodies.map((b) => [b.id, { x: b.x ?? 0, y: b.y ?? 0 }]))
+      const ids = movingNodes({
+        id: target,
+        scope,
+        from,
+        delta: { x: 0, y: 0 },
+        structures: this.structures,
+        layerOf: (id) => this.itemById.get(id)?.layer,
+        radiusOf: (id) => this.radiusOf(id),
+      })
+      marked = new Map([...ids].map((id) => [id, this.itemById.get(id)?.layer === layer]))
+    }
+    this.nodeLayer
+      .selectAll<SVGGElement, Item>('g.node')
+      .classed('will-move', (d) => marked.get(d.id) === true)
+      .classed('will-follow', (d) => marked.get(d.id) === false)
   }
 
   private applyHover(): void {

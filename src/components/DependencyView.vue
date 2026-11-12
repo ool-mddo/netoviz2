@@ -16,7 +16,7 @@ import { useTopologyStore } from '../stores/topology'
  * the objects it is supported by (lower layers) and the objects it supports (upper layers), in layer bands.
  * Shows nodes, or term-points if a term-point is selected (or "Term-points" is checked for a node).
  */
-const props = defineProps<{ visibleLayers: string[] }>()
+const props = defineProps<{ visibleLayers: string[]; fitSignal?: number }>()
 
 const topology = useTopologyStore()
 const selection = useSelectionStore()
@@ -461,140 +461,165 @@ function onFit(): void {
   userMoved = false
   fit()
 }
+// the size of the view is changed from outside (the layer list is collapsed/expanded)
+watch(
+  () => props.fitSignal,
+  () => onFit(),
+)
 </script>
 
 <template>
   <div class="dependency-view" data-testid="dependency-view">
-    <div class="toolbar">
-      <strong>Dependency</strong>
-      <span v-if="target" class="target" data-testid="dependency-target">{{ target.data.name }}</span>
-      <label v-if="target?.type === 'node'">
-        <input v-model="withTps" type="checkbox" data-testid="with-tps" />
-        Term-points
-      </label>
-      <button type="button" data-testid="dependency-fit" @click="onFit">Fit</button>
-      <label>
-        <input v-model="showIssues" type="checkbox" data-testid="show-issues" />
-        Mark problems
-      </label>
-      <button
-        v-if="groups"
-        type="button"
-        class="issue-count"
-        data-testid="issue-count"
-        :aria-expanded="showList"
-        @click="showList = !showList"
-      >
-        problems: {{ counts.warn }} warn / {{ counts.info }} info
-      </button>
-    </div>
-    <ul v-if="showList && groups" class="issue-list" data-testid="issue-list">
-      <li v-if="issueList.length === 0">No problems found.</li>
-      <li v-for="item in issueList" :key="item.key" :class="item.severity">
-        <button v-if="item.select" type="button" class="link" @click="void selectObject(item.select)">
-          <code>{{ item.code }}</code> {{ item.text }}
-        </button>
-        <template v-else>
-          <code>{{ item.code }}</code> {{ item.text }}
-        </template>
-      </li>
-    </ul>
-    <p v-if="!selection.selectedId" class="note" data-testid="dependency-hint">
-      Select a node or a term-point in the topology view to see what supports it and what it supports.
-    </p>
-    <p v-else-if="!target" class="note">Links have no dependency tree: select a node or a term-point.</p>
-    <p v-else-if="!groups" class="note">Loading...</p>
-    <svg ref="svgEl" class="dependency-svg" data-testid="dependency-svg">
-      <g :transform="transform.toString()">
-        <g
-          v-for="band in bands"
-          :key="band.id"
-          class="band"
-          :data-layer="band.id"
-          :style="{ '--layer-color': band.color }"
-        >
-          <rect :x="band.x" :y="band.y - BAND_HEIGHT / 2" :width="band.width" :height="BAND_HEIGHT" />
-          <text :x="band.x + 6" :y="band.y - BAND_HEIGHT / 2 + 12" class="band-label">{{ band.name }}</text>
-        </g>
-        <!-- nodes with term-points: a box (the term-points are inside the box of their node) -->
-        <g
-          v-for="group in drawnGroups.filter((g) => g.boxed)"
-          :key="`box:${group.id}`"
-          class="group"
-          :class="groupClass(group)"
-          :data-id="group.id"
-          :transform="`translate(${group.x},${group.y})`"
-          :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
-          @click.stop="void selectObject(group.id)"
-          @mouseenter="hoverId = group.id"
-          @mouseleave="hoverId = null"
-        >
-          <title>{{ titleOf(group) }}</title>
-          <rect :x="-group.width / 2" :y="-BOX_HEIGHT / 2" :width="group.width" :height="BOX_HEIGHT" rx="6" />
-          <text class="group-name" :y="-BOX_HEIGHT / 2 + 14" text-anchor="middle">{{ group.name }}</text>
-        </g>
-        <g class="edges">
-          <path
-            v-for="edge in drawnEdges"
-            :key="edge.key"
-            :d="edge.d"
-            class="support"
-            :class="{ warn: showIssues && edge.issues.length > 0, hover: hover.keys.has(edge.key) }"
-            :data-from="edge.from"
-            :data-to="edge.to"
-          >
-            <title v-if="edge.issues.length > 0">
-              {{ edge.issues.map((i) => `! ${i.message}`).join('\n') }}
-            </title>
-          </path>
-        </g>
-        <!-- nodes without term-points: a circle -->
-        <g
-          v-for="group in drawnGroups.filter((g) => !g.boxed)"
-          :key="`node:${group.id}`"
-          class="node"
-          :class="groupClass(group)"
-          :data-id="group.id"
-          :transform="`translate(${group.x},${group.y})`"
-          :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
-          @click.stop="void selectObject(group.id)"
-          @mouseenter="hoverId = group.id"
-          @mouseleave="hoverId = null"
-        >
-          <title>{{ titleOf(group) }}</title>
-          <circle :r="NODE_RADIUS" />
-          <text :y="NODE_RADIUS + 11" text-anchor="middle">{{ group.name }}</text>
-        </g>
-        <template v-for="group in drawnGroups" :key="`tps:${group.id}`">
+    <div class="view-main">
+      <div class="toolbar">
+        <strong>Dependency</strong>
+        <span v-if="target" class="target" data-testid="dependency-target">{{ target.data.name }}</span>
+        <label v-if="target?.type === 'node'">
+          <input v-model="withTps" type="checkbox" data-testid="with-tps" />
+          Term-points
+        </label>
+        <button type="button" data-testid="dependency-fit" @click="onFit">Fit</button>
+        <label>
+          <input v-model="showIssues" type="checkbox" data-testid="show-issues" />
+          Mark problems
+        </label>
+      </div>
+      <svg ref="svgEl" class="dependency-svg" data-testid="dependency-svg">
+        <g :transform="transform.toString()">
           <g
-            v-for="tp in group.drawnTps"
-            :key="tp.id"
-            class="node tp"
-            :class="{
-              selected: tp.id === selectedId,
-              hover: tp.id === hoverId,
-              peer: hover.peers.has(tp.id),
-              [`diff-${tp.diff}`]: Boolean(tp.diff),
-            }"
-            :data-id="tp.id"
-            :data-node="group.id"
-            :transform="`translate(${tp.x},${group.y + TP_Y})`"
+            v-for="band in bands"
+            :key="band.id"
+            class="band"
+            :data-layer="band.id"
+            :style="{ '--layer-color': band.color }"
+          >
+            <rect :x="band.x" :y="band.y - BAND_HEIGHT / 2" :width="band.width" :height="BAND_HEIGHT" />
+            <text :x="band.x + 6" :y="band.y - BAND_HEIGHT / 2 + 12" class="band-label">{{ band.name }}</text>
+          </g>
+          <!-- nodes with term-points: a box (the term-points are inside the box of their node) -->
+          <g
+            v-for="group in drawnGroups.filter((g) => g.boxed)"
+            :key="`box:${group.id}`"
+            class="group"
+            :class="groupClass(group)"
+            :data-id="group.id"
+            :transform="`translate(${group.x},${group.y})`"
             :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
-            @click.stop="void selectObject(tp.id)"
-            @mouseenter="hoverId = tp.id"
+            @click.stop="void selectObject(group.id)"
+            @mouseenter="hoverId = group.id"
             @mouseleave="hoverId = null"
           >
-            <title>{{ group.name }}:{{ tp.name }}</title>
-            <circle :r="TP_RADIUS" />
-            <text :y="TP_RADIUS + 10" text-anchor="middle">{{ tp.name }}</text>
+            <title>{{ titleOf(group) }}</title>
+            <rect
+              :x="-group.width / 2"
+              :y="-BOX_HEIGHT / 2"
+              :width="group.width"
+              :height="BOX_HEIGHT"
+              rx="6"
+            />
+            <text class="group-name" :y="-BOX_HEIGHT / 2 + 14" text-anchor="middle">{{ group.name }}</text>
           </g>
-        </template>
-      </g>
-    </svg>
+          <g class="edges">
+            <path
+              v-for="edge in drawnEdges"
+              :key="edge.key"
+              :d="edge.d"
+              class="support"
+              :class="{ warn: showIssues && edge.issues.length > 0, hover: hover.keys.has(edge.key) }"
+              :data-from="edge.from"
+              :data-to="edge.to"
+            >
+              <title v-if="edge.issues.length > 0">
+                {{ edge.issues.map((i) => `! ${i.message}`).join('\n') }}
+              </title>
+            </path>
+          </g>
+          <!-- nodes without term-points: a circle -->
+          <g
+            v-for="group in drawnGroups.filter((g) => !g.boxed)"
+            :key="`node:${group.id}`"
+            class="node"
+            :class="groupClass(group)"
+            :data-id="group.id"
+            :transform="`translate(${group.x},${group.y})`"
+            :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
+            @click.stop="void selectObject(group.id)"
+            @mouseenter="hoverId = group.id"
+            @mouseleave="hoverId = null"
+          >
+            <title>{{ titleOf(group) }}</title>
+            <circle :r="NODE_RADIUS" />
+            <text :y="NODE_RADIUS + 11" text-anchor="middle">{{ group.name }}</text>
+          </g>
+          <template v-for="group in drawnGroups" :key="`tps:${group.id}`">
+            <g
+              v-for="tp in group.drawnTps"
+              :key="tp.id"
+              class="node tp"
+              :class="{
+                selected: tp.id === selectedId,
+                hover: tp.id === hoverId,
+                peer: hover.peers.has(tp.id),
+                [`diff-${tp.diff}`]: Boolean(tp.diff),
+              }"
+              :data-id="tp.id"
+              :data-node="group.id"
+              :transform="`translate(${tp.x},${group.y + TP_Y})`"
+              :style="{ '--layer-color': layerColor(group.layer, layerOrder) }"
+              @click.stop="void selectObject(tp.id)"
+              @mouseenter="hoverId = tp.id"
+              @mouseleave="hoverId = null"
+            >
+              <title>{{ group.name }}:{{ tp.name }}</title>
+              <circle :r="TP_RADIUS" />
+              <text :y="TP_RADIUS + 10" text-anchor="middle">{{ tp.name }}</text>
+            </g>
+          </template>
+        </g>
+      </svg>
+    </div>
+    <!-- the state and the problems are under the svg (the viewer comes first) -->
+    <div class="info" data-testid="dependency-info">
+      <p v-if="!selection.selectedId" class="note" data-testid="dependency-hint">
+        Select a node or a term-point in the topology view to see what supports it and what it supports.
+      </p>
+      <p v-else-if="!target" class="note">Links have no dependency tree: select a node or a term-point.</p>
+      <p v-else-if="!groups" class="note">Loading...</p>
+      <div class="toolbar">
+        <button
+          v-if="groups"
+          type="button"
+          class="issue-count"
+          data-testid="issue-count"
+          :aria-expanded="showList"
+          @click="showList = !showList"
+        >
+          problems: {{ counts.warn }} warn / {{ counts.info }} info
+        </button>
+      </div>
+      <ul v-if="showList && groups" class="issue-list" data-testid="issue-list">
+        <li v-if="issueList.length === 0">No problems found.</li>
+        <li v-for="item in issueList" :key="item.key" :class="item.severity">
+          <button v-if="item.select" type="button" class="link" @click="void selectObject(item.select)">
+            <code>{{ item.code }}</code> {{ item.text }}
+          </button>
+          <template v-else>
+            <code>{{ item.code }}</code> {{ item.text }}
+          </template>
+        </li>
+      </ul>
+    </div>
   </div>
 </template>
 
 <style>
+/* the toolbar and the svg have a fixed height (the svg keeps its size): the information is added under them */
+.dependency-view .view-main {
+  display: flex;
+  flex-direction: column;
+  height: var(--viewer-height, 72vh);
+  min-height: 0;
+}
 .dependency-view .toolbar {
   display: flex;
   align-items: center;
@@ -602,12 +627,16 @@ function onFit(): void {
   gap: 0.75rem;
   margin-bottom: 0.25rem;
 }
+.dependency-view .info {
+  margin-top: 0.25rem;
+}
+.dependency-view .info .toolbar {
+  margin-bottom: 0;
+}
 .dependency-view .note {
   opacity: 0.7;
 }
 .dependency-view .issue-list {
-  max-height: 10rem;
-  overflow: auto;
   margin: 0 0 0.25rem;
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--border);
@@ -628,7 +657,8 @@ function onFit(): void {
 }
 .dependency-svg {
   width: 100%;
-  height: 72vh;
+  flex: 1 1 0;
+  min-height: 0;
   border: 1px solid var(--border);
   cursor: grab;
 }

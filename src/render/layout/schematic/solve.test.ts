@@ -19,16 +19,16 @@ describe('solvePositions', () => {
   it('puts the nodes of a tier at the same height, the tiers from the top apart by the radius and the gap', () => {
     const at = solve(['a-top-1', 'b-top-1', 'a-mid-1'], [], { 'a-mid-1': 30 })
     expect(at('a-top-1').y).toBe(at('b-top-1').y)
-    // the top row has radius 11, the next row radius 30: 11 + rowGap (90) + 30
-    expect(at('a-mid-1').y - at('a-top-1').y).toBeCloseTo(11 + 90 + 30, 6)
+    // the top row has radius 11, the next row radius 30: 11 + rowGap (120) + 30
+    expect(at('a-mid-1').y - at('a-top-1').y).toBeCloseTo(11 + 120 + 30, 6)
   })
 
   it('keeps the minimum gaps: pair < node < group (between the circles)', () => {
     const at = solve(['a-mid-1', 'a-mid-2', 'a-mid-5', 'b-mid-1'])
     const gap = (p: string, q: string) => at(q).x - at(p).x - 22
-    expect(gap('a-mid-1', 'a-mid-2')).toBeCloseTo(40, 6)
-    expect(gap('a-mid-2', 'a-mid-5')).toBeGreaterThanOrEqual(40 - 1e-6)
-    expect(gap('a-mid-5', 'b-mid-1')).toBeGreaterThanOrEqual(120 - 1e-6)
+    expect(gap('a-mid-1', 'a-mid-2')).toBeCloseTo(60, 6)
+    expect(gap('a-mid-2', 'a-mid-5')).toBeGreaterThanOrEqual(60 - 1e-6)
+    expect(gap('a-mid-5', 'b-mid-1')).toBeGreaterThanOrEqual(160 - 1e-6)
   })
 
   it('centers a pair on the nodes it is linked to', () => {
@@ -61,7 +61,7 @@ describe('solvePositions', () => {
     const at = solve([...aNodes, ...bNodes], [['a-top-1', 'b-low-1']])
     const maxA = Math.max(...aNodes.map((n) => at(n).x))
     const minB = Math.min(...bNodes.map((n) => at(n).x))
-    expect(minB - maxA).toBeGreaterThanOrEqual(120 + 22 - 1e-6)
+    expect(minB - maxA).toBeGreaterThanOrEqual(160 + 22 - 1e-6)
   })
 
   it('handles a single node, no node, and links to unknown nodes', () => {
@@ -85,7 +85,7 @@ describe('solvePositions', () => {
       .filter((n) => n.startsWith('b-mid-'))
       .map((n) => at(n).x)
       .sort((p, q) => p - q)
-    for (let i = 1; i < row.length; i++) expect(row[i]! - row[i - 1]!).toBeGreaterThanOrEqual(22 + 40 - 1e-6)
+    for (let i = 1; i < row.length; i++) expect(row[i]! - row[i - 1]!).toBeGreaterThanOrEqual(22 + 60 - 1e-6)
   })
 
   it('starts a node without a position from the one before it in the row', () => {
@@ -93,7 +93,7 @@ describe('solvePositions', () => {
     const initialX = new Map([['l/a-top-1', 100]])
     const positions = solvePositions(nodes, slotsOf(nodes), [], { initialX, iterations: 0 })
     const [first, second] = ['l/a-top-1', 'l/a-top-3'].map((id) => positions.get(id)!.x)
-    expect(second! - first!).toBeGreaterThanOrEqual(22 + 40 - 1e-6)
+    expect(second! - first!).toBeGreaterThanOrEqual(22 + 60 - 1e-6)
     expect(Number.isFinite(first!) && Number.isFinite(second!)).toBe(true)
   })
 
@@ -120,6 +120,6 @@ describe('solvePositions', () => {
       ['l/a-mid-1', 0],
     ])
     const spaced = solvePositions(nodes, slots, [], { initialX: close, iterations: 0 })
-    expect(spaced.get('l/a-top-3')!.x - spaced.get('l/a-top-1')!.x).toBeGreaterThanOrEqual(22 + 40 - 1e-6)
+    expect(spaced.get('l/a-top-3')!.x - spaced.get('l/a-top-1')!.x).toBeGreaterThanOrEqual(22 + 60 - 1e-6)
   })
 })

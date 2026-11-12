@@ -80,12 +80,21 @@ src/
 ```
 TopologyView
 ├─ SummaryBar        トポロジの概要 (networks の flags、警告、diff の有無)
-├─ LayerList         レイヤの表示切替
+├─ LayerList         レイヤの表示切替 (左のカラム。タブで細い帯に折りたためる)
 ├─ ViewToolbar       Term-points、Trace、Dependency view の切替
-├─ ForceView         トポロジ表示 (ForceRenderer を使う) + エンジンの切替 + schematic のパネル
-├─ DependencyView    選択したオブジェクトの依存ツリー (副画面。?dependency=1)
+├─ ForceView         トポロジ表示 (ForceRenderer を使う) + エンジンとレイヤの並べ方の切替。図の下に、統計と schematic のパネル
+├─ DependencyView    選択したオブジェクトの依存ツリー (副画面。?dependency=1)。図の下に、注意文と問題の一覧
 └─ AttributePanel    選択したオブジェクトの属性・diff・support
 ```
+
+### 画面の配置
+
+`TopologyView` は、左のレイヤ一覧、図 (ForceView、DependencyView)、AttributePanel を 1 つのグリッドに並べます。
+
+- **高さを揃える:** 図の部分 (ツールバーと svg) と AttributePanel は、同じ固定の高さ (`.layout` の `--viewer-height`、72vh) です。svg はその残りを使うので、メッセージが増減しても大きさが変わりません。
+- **情報は図の下に足す:** 統計、schematic のパネル、注意文、問題の一覧は、各 View の `.info` に表示します。高さは固定せず、内容なりに伸ばします (ページが下に伸びる。図を小さくしない)。
+- **レイヤ一覧の折りたたみ:** 「Layers」タブで、左のカラムを細い帯 (`--side-width`) にできる。選択はブラウザの `localStorage` (`netoviz2.sideCollapsed`) に保存する。幅が変わったら、各 View に `fitSignal` で知らせて、図を新しい大きさに合わせ直す。
+- **favicon:** `public/` に置く (`favicon.svg`、`favicon.ico`、`apple-touch-icon.png`)。ool-mddo の組織のアイコンを、小さくても見分けられるように単純化したもの。`index.html` から参照する (ビルドで `/netoviz2/` 配下のパスになる)。
 
 ### URL に持つ状態
 
@@ -107,9 +116,9 @@ URL を直接書き換えた場合も、選択・レイヤ・エンジンは URL
 flowchart TB
     api["API<br/>(summary / layers / supports / attributes / profiles)"] --> client["api/client.ts"]
     client --> topo["stores/topology<br/>(summary、レイヤ、supports、属性)"]
-    topo --> graph["domain/graph.ts<br/>(表示用グラフ)"]
+    topo --> dg["domain/graph.ts<br/>(表示用グラフ)"]
     topo --> sel["stores/selection<br/>(選択、トレース)"]
-    graph --> fv["components/ForceView"]
+    dg --> fv["components/ForceView"]
     sel --> fv
     fv --> fr["render/ForceRenderer<br/>(SVG)"]
     sel --> dv["components/DependencyView"]
@@ -141,9 +150,9 @@ flowchart TB
 **Vue のリアクティブ機構を通さず、DOM を直接更新**します。
 
 - **要素:** ノードは円、term-point (展開したとき) はノードの円周上のポート、リンクは線 (束ねた複数のリンクは 1 本)。ノードの半径は、ポートの数で決まる。
-- **ポート:** 相手のノードの方向に置く。同じノードのポートは、最小の間隔 (弧の長さ 14px) を空けて円周に広げる (`domain/ports.ts`)。ユーザーがドラッグしたポートは、その角度を保つ。
-- **操作:** ズーム・移動 (d3-zoom)、ノードのドラッグ、ポートのドラッグ (円周上)、クリック (選択)、ダブルクリック (term-point の展開)、ホバー (相手のポートや support の先を強調)。
-- **レイアウトの実行:** 表示するレイヤが全部読み込まれてから、レイヤごとに配置して、格子に並べる (`layout/pack.ts`)。同じグラフは配置し直さない。
+- **ポート:** 優先順位は、ユーザーがドラッグしたポート > 直線のリンクのポート (相手ノードの中心の方向。同じノード間の複数のリンクは平行に並べる) > それ以外 (迂回するリンクのポート、リンクの無いポート。他を動かさず空き位置に置く)。最小の間隔は弧の長さ 14px (`domain/ports.ts`、[design/layout.md](design/layout.md))。
+- **操作:** ズーム・移動 (d3-zoom)、ノードのドラッグ (schematic は、シミュレーションを使わず、20px のグリッドに丸めて動かす。Shift = 行、Ctrl/⌘ = 列。[design/schematic_layout.md](design/schematic_layout.md) の「手で動かす」)、ポートのドラッグ (円周上)、クリック (選択)、ダブルクリック (term-point の展開)、ホバー (相手のポートや support の先を強調)。
+- **レイアウトの実行:** 表示するレイヤが全部読み込まれてから、レイヤごとに配置して、並べる (`layout/pack.ts`)。並べ方は、既定が縦 1 列 (中央揃え)、`?layerlayout=grid` (または画面の Layers セレクト) で格子 (`ceil(sqrt(レイヤ数))` 列)。force エンジンは、レイヤ中心 (`layerCenter`) へ引く力で同じ並びにする。同じグラフは配置し直さない。
 - **強調:** 選択・トレース・ホバーを、CSS のクラス (`selected` `traced` `peer` `dim` など) で表す。
 
 `ForceView` が、ストアの状態 (グラフ、強調、エンジン、プロファイル) を `ForceRenderer` に渡します。`ForceRenderer` はストアを直接知りません。
@@ -185,6 +194,7 @@ flowchart LR
 | `slots.ts`                                   | 拠点を左右、階層を行、行内を重心法で並べる (離散的な配置)                                    |
 | `solve.ts`                                   | 座標を決める (行ごとの最小間隔と、行間のリンクを直線に近づける反復)                          |
 | `connectors.ts`                              | 機器をつなぐ接続点 (L3 セグメントなど) を、機器の間に置く                                    |
+| `move.ts`                                    | 手で動かすときの、動かすノードの決定 (行・列・他レイヤへの連動)、グリッド、接続点の置き直し  |
 | `index.ts`                                   | 上の手順をつなぐ。プロファイル → 継承 → 推論 → stress の順に試す。配置の由来と例外を報告する |
 | `render/linkRouter.ts`、`render/path.ts`     | リンクの経路 (水平・垂直の折れ線) と、角を丸めた SVG のパス                                  |
 

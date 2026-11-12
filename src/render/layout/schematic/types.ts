@@ -87,6 +87,20 @@ export interface SchematicReport {
   draft?: string
 }
 
+/**
+ * How the nodes of a layer were arranged, to move them by hand afterward (see `moveNodes`): the connection points are
+ * put between the devices again when the devices are moved, and the devices which follow a node of the base layer are
+ * moved with it.
+ */
+export interface SchematicStructure {
+  layer: string
+  /** Connection points (not subjects of the layout: put between the devices they are linked to) */
+  connectors: SchematicNode[]
+  links: ReadonlyArray<{ source: string; target: string }>
+  /** For each device whose position is inherited, the node of the base layer it follows */
+  follows: ReadonlyMap<string, string>
+}
+
 export interface SchematicLayerInput {
   layer: string
   nodes: readonly SchematicNode[]
@@ -97,6 +111,8 @@ export interface SchematicLayerInput {
   bases?: readonly SchematicBase[]
   /** Called with what the layout was made from and the exceptions */
   report?: (report: SchematicReport) => void
+  /** Called with how the nodes were arranged (it is not called for the stress layout) */
+  structure?: (structure: SchematicStructure) => void
 }
 
 /** Function to arrange the nodes of a layer by the schematic engine (centers of the nodes) */
