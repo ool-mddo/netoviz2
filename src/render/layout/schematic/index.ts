@@ -135,7 +135,12 @@ function arrangeByProfile(
     unclassifiedRow: profile.tiers.length,
     ...(profile.keepEmptyTiers ? { keepTiers: profile.tiers.length } : {}),
   })
-  const placed = solvePositions(devices, slots, deviceLinks)
+  const placed = solvePositions(
+    devices,
+    slots,
+    deviceLinks,
+    profile.symmetry ? { symmetry: profile.symmetry } : {},
+  )
   const positions =
     connectorIds.size === 0
       ? placed

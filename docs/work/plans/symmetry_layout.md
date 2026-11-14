@@ -68,7 +68,7 @@ playground の `profiles/mddo-bgp/asis.yaml` (emulated_asis の layer3) は、AS
 - 変更 (案): `types.ts` (`ProfileRule.align`)、`profile.ts` (読み込みと検査)、`annotate.ts` (group ごとの設定)、`slots.ts` / `solve.ts` (反復の中で行を軸に寄せる)、テスト、`profile_format.md`。
 - 確認: 奇数個・偶数個の行、ペアを含む行、リンクが斜めになるとき。
 
-### 段階 2: 列の鏡像配置 (①)
+### 段階 2: 列の鏡像配置 (①) — 実装済み (v0.4.0-dev)
 
 - 書式 (案): profile の最上位に `symmetry`。
   ```yaml

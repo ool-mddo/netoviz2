@@ -32,6 +32,51 @@ describe('solvePositions: empty rows (keepEmptyTiers)', () => {
   })
 })
 
+describe('solvePositions: symmetry (mirror)', () => {
+  // groups a | b | c in this order; c is wider (3 nodes in the low row) than a (1 node), so the centers of the
+  // groups are not at the same distances from b without the symmetry
+  const nodes = ['a-top-1', 'b-top-1', 'c-top-1', 'c-low-1', 'c-low-2', 'c-low-3'].map((n) => node(n))
+  const profile = parseProfiles(`
+view: v
+tiers: [top, low]
+name: '^(?<site>[a-z]+)-(?<role>[a-z]+)-(?<index>\\d+)$'
+rules:
+  - { select: '*', group: site }
+  - { select: '[role=top]', tier: top }
+  - { select: '[role=low]', tier: low }
+  - { select: '[site=a]', order: 1 }
+  - { select: '[site=b]', order: 2 }
+  - { select: '[site=c]', order: 3 }
+`).profiles[0]!
+  const centers = (symmetry?: { axis: string; mirror: Array<[string, string]> }) => {
+    const positions = solvePositions(nodes, slotsOf(nodes, [], profile), [], symmetry ? { symmetry } : {})
+    const center = (site: string) => {
+      const xs = nodes.filter((n) => n.name.startsWith(`${site}-`)).map((n) => positions.get(n.id)!.x)
+      return (Math.min(...xs) + Math.max(...xs)) / 2
+    }
+    return { a: center('a'), b: center('b'), c: center('c') }
+  }
+
+  it('is not symmetric without the symmetry (the premise of the test)', () => {
+    const { a, b, c } = centers()
+    expect(Math.abs(b - a - (c - b))).toBeGreaterThan(10)
+  })
+
+  it('puts the pair of groups at the same distance on both sides of the axis group', () => {
+    const { a, b, c } = centers({ axis: 'b', mirror: [['a', 'c']] })
+    expect(b - a).toBeCloseTo(c - b, 6)
+  })
+
+  it('does not bring the groups closer than the gap (the nearer group moves outward), and ignores unknown groups', () => {
+    const plain = centers()
+    const mirrored = centers({ axis: 'b', mirror: [['a', 'c']] })
+    expect(mirrored.b - mirrored.a).toBeGreaterThanOrEqual(plain.b - plain.a - 1e-6)
+    expect(mirrored.c - mirrored.b).toBeGreaterThanOrEqual(plain.c - plain.b - 1e-6)
+    expect(centers({ axis: 'zzz', mirror: [['a', 'c']] })).toEqual(plain)
+    expect(centers({ axis: 'b', mirror: [['a', 'zzz']] })).toEqual(plain)
+  })
+})
+
 describe('solvePositions: align center', () => {
   // group a: top row has 1 node (linked to the 3 nodes of the low row, which are pulled to the left by group b's links)
   const profile = parseProfiles(`

@@ -18,6 +18,11 @@ export interface SolveOptions {
    * the positions are kept as far as the order and the gaps allow (the links are not made straight).
    */
   initialX?: ReadonlyMap<string, number>
+  /**
+   * Mirror symmetry of the groups: each pair of `mirror` is put at the same distance on both sides of the center of
+   * the `axis` group (see `DiagramProfile.symmetry`). Groups which do not exist are ignored.
+   */
+  symmetry?: { axis: string; mirror: ReadonlyArray<readonly [string, string]> }
 }
 
 const DEFAULTS = { nodeGap: 60, pairGap: 60, groupGap: 160, rowGap: 120, iterations: 40 }
@@ -146,6 +151,40 @@ export function solvePositions(
       }
     })
   }
+  // symmetry: each pair of groups is put at the same distance on both sides of the center of the axis group: the
+  // farther one stays, the nearer one moves outward (so that the blocks do not come closer than `spaceOutBlocks`
+  // made them). The blocks are moved as a whole, so `spaceOutBlocks` has to run after this (it moves them only if
+  // they overlap another block: then the symmetry may not hold).
+  const blockOf = (key: string): string[] | undefined => {
+    const group = layout.groups.find((g) => g.key === key)
+    const ids = group ? [...group.cells.values()].flatMap((cell) => cell.flatMap((unit) => unit.ids)) : []
+    return ids.length > 0 ? ids : undefined
+  }
+  const extentOf = (ids: readonly string[]) => ({
+    min: Math.min(...ids.map((id) => (x.get(id) ?? 0) - radius(id))),
+    max: Math.max(...ids.map((id) => (x.get(id) ?? 0) + radius(id))),
+  })
+  const mirrorBlocks = () => {
+    if (!opt.symmetry) return
+    const axisIds = blockOf(opt.symmetry.axis)
+    if (!axisIds) return
+    const axisExtent = extentOf(axisIds)
+    const axis = (axisExtent.min + axisExtent.max) / 2
+    for (const [a, b] of opt.symmetry.mirror) {
+      const [idsA, idsB] = [blockOf(a), blockOf(b)]
+      if (!idsA || !idsB) continue
+      const centers = [idsA, idsB].map((ids) => {
+        const e = extentOf(ids)
+        return (e.min + e.max) / 2
+      }) as [number, number]
+      // the one on the left (the smaller center) goes to the left
+      const [left, right] = centers[0] <= centers[1] ? [idsA, idsB] : [idsB, idsA]
+      const [cl, cr] = centers[0] <= centers[1] ? centers : [centers[1], centers[0]]
+      const distance = Math.max(axis - cl, cr - axis, 0)
+      for (const id of left) x.set(id, (x.get(id) ?? 0) + (axis - distance - cl))
+      for (const id of right) x.set(id, (x.get(id) ?? 0) + (axis + distance - cr))
+    }
+  }
   const spaceOutBlocks = () => {
     if (blocks.length < 2) return
     const extents = blocks.map((ids) => ({
@@ -190,11 +229,13 @@ export function solvePositions(
     }
     spaceOutBlocks()
     centerAlignedRows()
+    mirrorBlocks()
   }
 
   if (opt.initialX) spaceOutBlocks() // the groups are kept apart through all the rows
-  if (layout.groups.some((group) => group.align === 'center')) {
+  if (layout.groups.some((group) => group.align === 'center') || opt.symmetry) {
     centerAlignedRows()
+    mirrorBlocks()
     spaceOutBlocks()
   }
 

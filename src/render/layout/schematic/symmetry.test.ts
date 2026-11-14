@@ -46,6 +46,18 @@ describe('mddo-bgp layer3 layout: symmetry', () => {
     }
   })
 
+  it('(1) puts the centers of the upstream columns at the same distance from the center column', async () => {
+    const { at } = await arrange()
+    const centerOf = (names: string[]) => {
+      const xs = names.map((n) => at(n).x)
+      return (Math.min(...xs) + Math.max(...xs)) / 2
+    }
+    const columns = (as: string) =>
+      ['edge01', 'edge02', 'core00', 'core01', 'endpoint00', 'endpoint03'].map((n) => `${as}-${n}`)
+    const center = centerOf(['edge-tk01', 'edge-tk03', 'as65520-endpoint00', 'as65520-endpoint03'])
+    expect(center - centerOf(columns('as65550'))).toBeCloseTo(centerOf(columns('as65560')) - center, 0)
+  })
+
   it('(1) puts the own AS (the center column) on the axis between the upstream ASes', async () => {
     const { at } = await arrange()
     const xs = ['edge-tk01', 'edge-tk02', 'edge-tk03'].map((n) => at(n).x)

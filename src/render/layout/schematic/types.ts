@@ -50,6 +50,11 @@ export interface DiagramProfile {
    * the downstream side of a diagram have the same numbers of rows (default: the rows without nodes are dropped)
    */
   keepEmptyTiers?: boolean
+  /**
+   * Mirror symmetry of the groups (columns): each pair of `mirror` is put at the same distance on both sides of the
+   * `axis` group (the groups are the values of the groups of the nodes, see `ProfileRule.group`)
+   */
+  symmetry?: { axis: string; mirror: Array<[string, string]> }
   /** Regular expression with named groups to split the name of a node (matched against `name`, not the ID) */
   name?: RegExp
   /** The layer whose group / tier / order are inherited through the supports (default: found automatically) */

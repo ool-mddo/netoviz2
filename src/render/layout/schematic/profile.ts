@@ -10,10 +10,20 @@ export class ProfileError extends Error {}
 
 // Unknown keys (e.g. the keys of the design which are not supported yet) are ignored with a warning: a typo in
 // `target` would widen the layers the profile is applied to, so it is checked as well.
-const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'keepEmptyTiers', 'name', 'inherit', 'rules'])
+const KNOWN_TOP_KEYS = new Set([
+  'view',
+  'target',
+  'tiers',
+  'keepEmptyTiers',
+  'symmetry',
+  'name',
+  'inherit',
+  'rules',
+])
 const KNOWN_TARGET_KEYS = new Set(['network', 'snapshot', 'layer'])
 const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'align', 'pair'])
 const KNOWN_GROUP_KEYS = new Set(['value'])
+const KNOWN_SYMMETRY_KEYS = new Set(['axis', 'mirror'])
 const KNOWN_PAIR_KEYS = new Set(['by', 'primary'])
 const KNOWN_INHERIT_KEYS = new Set(['from', 'via'])
 
@@ -160,6 +170,19 @@ export function parseProfile(value: unknown, warnings: string[]): DiagramProfile
   const rules = rulesRaw.map((rule, i) => parseRule(rule, i, tiers, warnings))
   const profile: DiagramProfile = { view, target, tiers, rules }
   if (inherit) profile.inherit = inherit
+  if (raw.symmetry !== undefined) {
+    const symmetry = asRecord(raw.symmetry, 'symmetry')
+    warnUnknownKeys(symmetry, KNOWN_SYMMETRY_KEYS, 'symmetry: ', warnings)
+    const mirrorRaw = symmetry.mirror ?? []
+    if (!Array.isArray(mirrorRaw)) throw new ProfileError('symmetry.mirror must be a list of pairs')
+    const mirror = mirrorRaw.map((pair, i): [string, string] => {
+      if (!Array.isArray(pair) || pair.length !== 2) {
+        throw new ProfileError(`symmetry.mirror[${i}] must be a pair of two group values`)
+      }
+      return [asString(pair[0], `symmetry.mirror[${i}][0]`), asString(pair[1], `symmetry.mirror[${i}][1]`)]
+    })
+    profile.symmetry = { axis: asString(symmetry.axis, 'symmetry.axis'), mirror }
+  }
   if (raw.keepEmptyTiers !== undefined) {
     if (typeof raw.keepEmptyTiers !== 'boolean')
       throw new ProfileError('keepEmptyTiers must be true or false')

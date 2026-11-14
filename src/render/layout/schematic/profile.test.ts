@@ -82,6 +82,35 @@ describe('parseProfiles', () => {
     expect(() => parseProfiles('view: v\nkeepEmptyTiers: yes please\n')).toThrow(ProfileError)
   })
 
+  it('parses symmetry (the axis group and the pairs of groups put on both sides of it)', () => {
+    const { profiles, warnings } = parseProfiles(
+      'view: v\nsymmetry: { axis: center, mirror: [[a, b], [c, d]] }\n',
+    )
+    expect(profiles[0]?.symmetry).toEqual({
+      axis: 'center',
+      mirror: [
+        ['a', 'b'],
+        ['c', 'd'],
+      ],
+    })
+    expect(warnings).toEqual([])
+    expect(parseProfiles('view: v\nsymmetry: { axis: c }\n').profiles[0]?.symmetry).toEqual({
+      axis: 'c',
+      mirror: [],
+    })
+    for (const symmetry of [
+      '{ mirror: [[a, b]] }',
+      '{ axis: c, mirror: [[a]] }',
+      '{ axis: c, mirror: a }',
+      'x',
+    ]) {
+      expect(() => parseProfiles(`view: v\nsymmetry: ${symmetry}\n`)).toThrow(ProfileError)
+    }
+    expect(parseProfiles('view: v\nsymmetry: { axis: c, x: 1 }\n').warnings).toEqual([
+      "symmetry: unknown key 'x' is ignored",
+    ])
+  })
+
   it('warns about unknown top-level keys (axes, inherit are not supported yet)', () => {
     const { warnings } = parseProfiles('view: v\naxes: { y: tier }\n')
     expect(warnings).toEqual(["unknown key 'axes' is ignored"])
