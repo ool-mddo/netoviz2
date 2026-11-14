@@ -15,6 +15,11 @@ export interface ProfileRule {
   /** Name of the captured value (see `DiagramProfile.name`) which is the group (e.g. site) of the node */
   group?: string
   /**
+   * A literal value of the group (the rule is written as `group: { value: <value> }`): nodes given the same value
+   * are one group even if their names are not split into the same captured value. Mutually exclusive with `group`.
+   */
+  groupValue?: string
+  /**
    * Order of the group the node belongs to among the groups (smaller = left). A group is ordered by the smallest
    * order of its nodes (groups without order follow, by name), so put it on the rule which selects the whole group.
    */

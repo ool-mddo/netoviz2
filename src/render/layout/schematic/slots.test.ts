@@ -19,6 +19,24 @@ rules:
     expect(slotsOf(nodes, [], profile).groups.map((g) => g.key)).toEqual(['b', 'm', 'z', ''])
   })
 
+  it('puts the groups of a literal value (`group: { value }`) in one column between the groups by order (Y shape)', () => {
+    const profile = parseProfiles(`
+view: v
+tiers: [up, own, down]
+name: '^(?:(?<site>as\\d+)-)?(?<role>[a-z]+)(?:-(?<tk>tk))?(?<n>\\d+)$'
+rules:
+  - { select: '*', group: site }
+  - { select: '[tk=tk]', group: { value: center }, tier: own, order: 2 }
+  - { select: '[site=as9]', group: { value: center }, tier: down }
+  - { select: '[site=as1]', tier: up, order: 1 }
+  - { select: '[site=as3]', tier: up, order: 3 }
+`).profiles[0]!
+    const nodes = ['as1-edge01', 'as3-edge01', 'edge-tk01', 'as9-edge01'].map((n) => node(n))
+    const layout = slotsOf(nodes, [], profile)
+    expect(layout.groups.map((g) => g.key)).toEqual(['as1', 'center', 'as3'])
+    expect(namesOf(layout, nodes)['center']).toEqual({ 1: ['edge-tk01'], 2: ['as9-edge01'] })
+  })
+
   it('puts the rows by the tier, and the nodes without a tier in the row after the last tier', () => {
     const nodes = [node('a-low-1'), node('a-top-1'), node('stray')]
     const layout = slotsOf(nodes)

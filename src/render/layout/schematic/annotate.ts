@@ -58,7 +58,9 @@ export function annotate(nodes: readonly SchematicNode[], profile: DiagramProfil
         annotation.tier = rule.tier
         annotation.tierIndex = profile.tiers.indexOf(rule.tier)
       }
-      if (rule.group !== undefined) {
+      if (rule.groupValue !== undefined) {
+        annotation.group = rule.groupValue
+      } else if (rule.group !== undefined) {
         const group = captures[rule.group]
         if (group === undefined) delete annotation.group
         else annotation.group = group
