@@ -112,6 +112,12 @@ function setEngine(next: LayoutEngine): void {
   else query.layout = next
   void router.replace({ query })
 }
+function setProfile(name: string | undefined): void {
+  const query = { ...route.query }
+  if (name === undefined) delete query.profile
+  else query.profile = name
+  void router.replace({ query })
+}
 function setLayerArrangement(next: LayerArrangement): void {
   const query = { ...route.query }
   if (next === DEFAULT_LAYER_ARRANGEMENT) delete query.layerlayout
@@ -209,6 +215,7 @@ onBeforeUnmount(() => selection.select(null))
             :profile="profile"
             :fit-signal="fitSignal"
             @update:engine="setEngine"
+            @update:profile="setProfile"
             @update:layer-arrangement="setLayerArrangement"
           />
           <DependencyView v-if="dependencyOn" :visible-layers="visibleLayers" :fit-signal="fitSignal" />

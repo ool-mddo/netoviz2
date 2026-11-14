@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseProfileDocuments } from './profile'
 import { profileSourceOf } from '../../../test/profileSource'
-import { loadProfiles, type ProfileSource } from './profileSource'
+import { loadProfiles, profileChoices, type ProfileSource } from './profileSource'
 
 const source = profileSourceOf({
   '../../../profiles/mddo-fw.yaml': () => Promise.resolve('view: physical\n'),
@@ -135,6 +135,39 @@ describe('parseProfileDocuments', () => {
     ).toEqual(/^(?:a|b)$/)
     expect(() => parseProfileDocuments([{ view: 'v', target: { snapshot: '(' } }])).toThrow(
       'target.snapshot is not a valid regular expression',
+    )
+  })
+})
+
+describe('profileChoices', () => {
+  const files = sourceOf(
+    { name: 'b', documents: [{ view: 'b', target: { network: 'nw', snapshot: 's1|s2' } }] },
+    { name: 'a', documents: [{ view: 'a' }, { view: 'a2', target: { snapshot: 'other' } }] },
+    { name: 'x', documents: [{ view: 'x', target: { snapshot: 'other' } }] },
+    { name: 'e', documents: [], error: 'did not find expected key' },
+    { name: 'bad', documents: [{ view: 'v', rules: 'x' }] },
+    { name: 'empty', documents: [] },
+  )
+
+  it('lists the files in the order of the names, and tells which apply to the network / snapshot', async () => {
+    const choices = await profileChoices('nw', files, 's1')
+    expect(choices.map((c) => [c.name, c.applies])).toEqual([
+      ['a', true], // one of its documents (without target) applies
+      ['b', true],
+      ['bad', false],
+      ['e', false],
+      ['empty', false],
+      ['x', false],
+    ])
+    expect(choices.find((c) => c.name === 'e')?.error).toBe('did not find expected key')
+    expect(choices.find((c) => c.name === 'bad')?.error).toContain('rules')
+    expect(choices.find((c) => c.name === 'x')?.error).toBeUndefined()
+  })
+
+  it('does not check the snapshot when it is unknown, and checks the network', async () => {
+    expect((await profileChoices('nw', files)).find((c) => c.name === 'x')?.applies).toBe(true)
+    expect((await profileChoices('other-network', files, 's1')).find((c) => c.name === 'b')?.applies).toBe(
+      false,
     )
   })
 })

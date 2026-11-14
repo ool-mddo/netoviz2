@@ -245,6 +245,24 @@ describe('TopologyView', () => {
       )
     })
 
+    it('puts the profile chosen in the select into the URL (auto removes it), and uses it', async () => {
+      mocked.getSupports.mockResolvedValue(supportsData)
+      mocked.getProfiles.mockResolvedValue([
+        { name: 'p1', documents: [{ view: 'v', target: { layer: 'layer1' } }] },
+        { name: 'p2', documents: [{ view: 'v', target: { layer: 'layer1' } }] },
+      ])
+      const wrapper = await mountView('/nw/ss?layout=schematic')
+      await vi.waitFor(() => expect(wrapper.find('[data-testid=profile-select]').exists()).toBe(true))
+      await wrapper.get('[data-testid=profile-select]').setValue('p2')
+      await flushPromises()
+      expect(router.currentRoute.value.query.profile).toBe('p2')
+      expect(router.currentRoute.value.query.layout).toBe('schematic')
+      expect((wrapper.get('[data-testid=profile-select]').element as HTMLSelectElement).value).toBe('p2')
+      await wrapper.get('[data-testid=profile-select]').setValue('')
+      await flushPromises()
+      expect(router.currentRoute.value.query.profile).toBeUndefined()
+    })
+
     it('ignores an unknown engine in the URL query (e.g. an engine which was removed)', async () => {
       const wrapper = await mountView('/nw/ss?layout=elk-stress&compare=elk-layered')
       expect(selected(wrapper)).toEqual(['stress'])

@@ -5,12 +5,15 @@ import { buildDisplayGraph, displayIdOf } from '../domain/graph'
 import { layersTopDown } from '../domain/layers'
 import { ForceRenderer, type Highlight } from '../render/forceRenderer'
 import { getProfiles } from '../api/client'
+import type { ProfileFile } from '../api/types'
 import { selectProfile } from '../render/layout/schematic/profile'
 import {
   loadProfiles,
   type LoadedProfile,
   type LoadedProfiles,
+  type ProfileChoice,
   type ProfileSource,
+  profileChoices,
 } from '../render/layout/schematic/profileSource'
 import type { SchematicBase, SchematicReport } from '../render/layout/schematic/types'
 import { lowerLayerIdsOf, schematicBasesOf } from '../domain/schematicBases'
@@ -44,6 +47,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:engine': [engine: LayoutEngine]
   'update:layerArrangement': [arrangement: LayerArrangement]
+  /** The profile is chosen by the user (the name of the file, or undefined: select by the target) */
+  'update:profile': [name: string | undefined]
 }>()
 
 const topology = useTopologyStore()
@@ -141,6 +146,49 @@ onBeforeUnmount(() => {
   renderer?.destroy()
 })
 
+/**
+ * The profile files of the network, kept after the first successful fetch (the loading of the profiles and the choices
+ * share them: the backend is asked once for the view, which is made again for another network / snapshot).
+ */
+let filesCache: ProfileFile[] | undefined
+const cachedSource: ProfileSource = async (network) => {
+  if (filesCache) return filesCache
+  const files = await (props.profileSource ?? getProfiles)(network)
+  filesCache = files
+  return files
+}
+/** The profile files which can be chosen in the toolbar (loaded when the schematic layout is used) */
+const choices = ref<ProfileChoice[]>([])
+let choicesLoaded = false
+async function loadChoices(): Promise<void> {
+  if (choicesLoaded) return
+  choicesLoaded = true
+  try {
+    choices.value = await profileChoices(topology.network, cachedSource, topology.snapshot || undefined)
+  } catch {
+    choices.value = [] // the error is told by the loading of the profiles
+    choicesLoaded = false
+  }
+}
+/**
+ * Items of the profile select: the files which apply to this snapshot (the others are hidden, except the one which
+ * is named in the URL: it is shown with the reason so that the user sees why it is not used)
+ */
+const profileItems = computed(() =>
+  choices.value
+    .filter((choice) => choice.applies || choice.name === props.profile)
+    .map((choice) => ({
+      name: choice.name,
+      label: choice.applies
+        ? choice.name
+        : `${choice.name} (${choice.error ?? 'does not apply to this snapshot'})`,
+    })),
+)
+function onProfileChange(event: Event): void {
+  const name = (event.target as HTMLSelectElement).value
+  emit('update:profile', name === '' ? undefined : name)
+}
+
 /** To ignore the result of an old (asynchronous) loading of a profile */
 let profileToken = 0
 /**
@@ -170,7 +218,7 @@ async function applyProfile(): Promise<void> {
   try {
     let loaded = loadedProfiles.get(name ?? '')
     if (!loaded) {
-      loaded = await loadProfiles(topology.network, props.profileSource ?? getProfiles, {
+      loaded = await loadProfiles(topology.network, cachedSource, {
         ...(name === undefined ? {} : { name }),
         ...(topology.snapshot ? { snapshot: topology.snapshot } : {}),
       })
@@ -188,6 +236,7 @@ async function applyProfile(): Promise<void> {
   }
   profileSettled.value = true
   arrangeWhenReady()
+  void loadChoices() // after the profiles are loaded (the choices are fetched once, apart from the loading)
 }
 watch([() => props.profile, () => props.engine === 'schematic'], () => void applyProfile())
 
@@ -341,6 +390,13 @@ function onEngineChange(event: Event): void {
           Layout
           <select :value="engine" data-testid="layout-select" @change="onEngineChange">
             <option v-for="item in LAYOUT_ENGINES" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </select>
+        </label>
+        <label v-if="engine === 'schematic' && (profileItems.length > 0 || profile)">
+          Profile
+          <select :value="profile ?? ''" data-testid="profile-select" @change="onProfileChange">
+            <option value="">Auto (by target)</option>
+            <option v-for="item in profileItems" :key="item.name" :value="item.name">{{ item.label }}</option>
           </select>
         </label>
         <label>

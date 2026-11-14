@@ -313,6 +313,93 @@ describe('ForceView', () => {
     })
   })
 
+  describe('profile select', () => {
+    const profileSource: ProfileSource = () =>
+      Promise.resolve([
+        { name: 'ok', documents: [{ view: 'v', target: { layer: 'layer1' } }] },
+        { name: 'other', documents: [{ view: 'v', target: { network: 'nw', snapshot: 'x.' } }] },
+        { name: 'broken', documents: [], error: 'bad yaml' },
+      ])
+    const items = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.get('[data-testid=profile-select]').findAll('option')
+
+    it('is shown for the schematic layout only, with the files which apply to this snapshot', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profileSource,
+      })
+      current = wrapper
+      await flushPromises()
+      expect(items(wrapper).map((o) => [o.attributes('value'), o.text()])).toEqual([
+        ['', 'Auto (by target)'],
+        ['ok', 'ok'], // `other` (another snapshot) and `broken` are hidden
+      ])
+      expect((wrapper.get('[data-testid=profile-select]').element as HTMLSelectElement).value).toBe('')
+      await wrapper.setProps({ engine: 'stress' })
+      expect(wrapper.find('[data-testid=profile-select]').exists()).toBe(false)
+      const other = await mountView(['layer1', 'layer2'], undefined, { profileSource })
+      expect(other.wrapper.find('[data-testid=profile-select]').exists()).toBe(false)
+      other.wrapper.unmount()
+    })
+
+    it('tells the choice (the name, or undefined for auto)', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profileSource,
+      })
+      current = wrapper
+      await flushPromises()
+      await wrapper.get('[data-testid=profile-select]').setValue('ok')
+      await wrapper.setProps({ profile: 'ok' })
+      await flushPromises()
+      expect((wrapper.get('[data-testid=profile-select]').element as HTMLSelectElement).value).toBe('ok')
+      await wrapper.get('[data-testid=profile-select]').setValue('')
+      expect(wrapper.emitted('update:profile')).toEqual([['ok'], [undefined]])
+    })
+
+    it('shows the file named in the URL even if it does not apply, with the reason', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profile: 'other',
+        profileSource,
+      })
+      current = wrapper
+      await flushPromises()
+      expect(items(wrapper).map((o) => o.text())).toEqual([
+        'Auto (by target)',
+        'ok',
+        'other (does not apply to this snapshot)',
+      ])
+    })
+
+    it('is not shown when no file applies and none is named (nothing to choose)', async () => {
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profileSource: () => Promise.resolve([]),
+      })
+      current = wrapper
+      await flushPromises()
+      expect(wrapper.find('[data-testid=profile-select]').exists()).toBe(false)
+    })
+
+    it('asks the backend once for the choices and the loading of the profiles', async () => {
+      let calls = 0
+      const counted: ProfileSource = () => {
+        calls++
+        return profileSource('nw')
+      }
+      const { wrapper } = await mountView(['layer1', 'layer2'], undefined, {
+        engine: 'schematic',
+        profileSource: counted,
+      })
+      current = wrapper
+      await flushPromises()
+      await wrapper.setProps({ profile: 'ok' })
+      await flushPromises()
+      expect(calls).toBe(1)
+    })
+  })
+
   describe('diagram profile', () => {
     const profileSource = profileSourceOf({
       'ok.yaml': () => Promise.resolve('view: v\ntarget: { layer: layer1 }\n'),
