@@ -120,7 +120,8 @@ rules:
 
 ## 例
 
-playground の `profiles/mddo-fw/asis.yaml` (3 拠点の FW 構成。拠点が左右、br → fw → cr → seg → host が上下、1 と 2 が冗長ペア)。`profiles/mddo-bgp/asis.yaml` (自 AS を中央の縦列に、外部 AS を左右に置く Y 字。`group: { value }` を使う)。
+playground の `profiles/mddo-fw/asis.yaml` (3 拠点の FW 構成。拠点が左右、br → fw → cr → seg → host が上下、1 と 2 が冗長ペア)。`profiles/mddo-bgp/asis.yaml` (自 AS を中央の縦列に、外部 AS を左右に、下流 AS を下に置く Y 字。`group: { value }`・`align`・`symmetry`・`keepEmptyTiers` をすべて使う)。
+`profiles/mddo-fw/asis_y.yaml` (DC = site-a を中央の縦列に、拠点 = site-b / site-c を上の左右に置く Y 字。`align`・`symmetry` を使う。`asis.yaml` の別案で、`?profile=asis_y` で選ぶ)。
 
 ## 方針
 

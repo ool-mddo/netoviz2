@@ -1,6 +1,30 @@
 # schematic レイアウトで対称性を扱う (計画)
 
-状態: **案。承認前。コードは変更していない。**
+状態: **実装済み (v0.4.0-dev、2026-11-14)。** 段階 0〜3 をすべて実装し、mddo-bgp と mddo-fw で描画を確認した。
+
+## 実装状況の要約
+
+| 段階 | 内容                              | 書式                                       | 状態   |
+| ---- | --------------------------------- | ------------------------------------------ | ------ |
+| 前提 | group の固定値 (名前に依らない列) | 規則の `group: { value: <値> }`            | 実装済 |
+| 0    | 現状の測定                        | (テスト: `symmetry.test.ts`、フィクスチャ) | 実装済 |
+| 1    | 行の中央揃え (②)                  | 規則の `align: center`                     | 実装済 |
+| 2    | 列の鏡像配置 (①)                  | 最上位の `symmetry: { axis, mirror }`      | 実装済 |
+| 3    | 空の行を残す (③)                  | 最上位の `keepEmptyTiers: true`            | 実装済 |
+
+- 仕様 (現行): [design/profile_format.md](../../design/profile_format.md) (「拠点 (group) の決め方」「左右対称」「空の行」「列の鏡像配置」)、[design/schematic_layout.md](../../design/schematic_layout.md)。固定値の group の経緯: [group_literal_value.md](group_literal_value.md)。
+- コミット (`v0.4.0-dev`): 固定値 group `763aacb`、計画 `26c9af4`、段階 0 `c3e1555`、段階 1 `03c5cac`、段階 3 `1656830`、段階 2 `53907e1`。
+- 利用した profile (playground): `profiles/mddo-bgp/asis.yaml` (自 AS を中央、外部 AS を左右、下流 AS を下に置く Y 字。固定値 group・`align`・`symmetry`・`keepEmptyTiers` をすべて使う)、`profiles/mddo-fw/asis_y.yaml` (DC を中央の縦列、拠点を上の左右に置く Y 字。`align`・`symmetry`。`?profile=asis_y` で選ぶ)。
+- テスト用のコピー: `src/test/mddoBgpProfile.yaml` (`profiles/mddo-bgp/asis.yaml` と同じ内容。変えたら同期する)。
+- 互換性: 追加のキーのみで、書かなければ従来の動作。`profiles/mddo-fw/asis.yaml` の配置は変わらない。netomox-exp は YAML → JSON の変換だけなので、変更は不要だった (新しいキーが素通しで返ることを確認済み)。
+
+## 残っている制限・今後の課題
+
+- `symmetry` は列の**位置**だけを合わせる。2 つの列の中のノードの鏡像は保証しない (中の左右対称は `align` で、列ごとに行う)。
+- 外へ動かした列が、さらに外側の列と重なるときは、列の間隔を取り直すので、鏡像が保たれないことがある。
+- 拠点ごとに階層 (tier) を変えるときは、拠点ごとに規則を書く必要がある (1 つの規則で複数の拠点を選ぶ書式は無い。例: `profiles/mddo-fw/asis_y.yaml`)。
+- 空の行を、リンクが通るときの見え方は、実データ (mddo-bgp) でしか確認していない。
+- 列の x 座標は、リンクの希望位置の最小二乗で決まる。`align` と `symmetry` が効くのは、列の中と列どうしの位置まで。
 
 ## 背景と目的
 
@@ -56,48 +80,48 @@ playground の `profiles/mddo-bgp/asis.yaml` (emulated_asis の layer3) は、AS
 - ② AS の内部は**対称になっていない**。例: AS65550 の `edge01/02` (x=-387, -305) の中心 (-346) が `core00` (-305) とずれ、4 つの endpoint (-551〜-305) も `core01` (-305) が右端にある。AS65520 は対称 (自 AS の列と同じ軸に揃っている)。
 - ③ 上流側は endpoint → core01 → core00 → edge の 4 行、下流側は edge → core00 → endpoint の 3 行で、行数が違う。行の間隔は、セグメントの行が挟まるため不揃い。
 
-→ 段階 1 (②) は必要。段階 2 (①) は、この topology では既に成り立っているが、対称でない topology では保証されない (必要性は低い)。段階 3 (③) は必要。
+→ 段階 1 (②) は必要。段階 2 (①) は、この topology では既に成り立っているが、対称でない topology では保証されない (必要性は低いが、保証のために実装した)。段階 3 (③) は必要。
 
 ### 段階 1: 行の中央揃え (②) — 実装済み (v0.4.0-dev)
 
-- 書式 (案): group を単位に `align: center`。
+- 書式: group を単位に `align: center`。
   ```yaml
   - { select: '[site=as65550]', align: center }
   ```
 - 動作: その group の各行を、group の軸 (全行の中心の平均) に揃える。行の中の順序と最小間隔は守る。リンクを縦に近づける力より優先する。
-- 変更 (案): `types.ts` (`ProfileRule.align`)、`profile.ts` (読み込みと検査)、`annotate.ts` (group ごとの設定)、`slots.ts` / `solve.ts` (反復の中で行を軸に寄せる)、テスト、`profile_format.md`。
+- 変更: `types.ts` (`ProfileRule.align`)、`profile.ts` (読み込みと検査)、`annotate.ts` (group ごとの設定)、`slots.ts` / `solve.ts` (反復の中で行を軸に寄せる)、テスト、`profile_format.md`。
 - 確認: 奇数個・偶数個の行、ペアを含む行、リンクが斜めになるとき。
 
 ### 段階 2: 列の鏡像配置 (①) — 実装済み (v0.4.0-dev)
 
-- 書式 (案): profile の最上位に `symmetry`。
+- 書式: profile の最上位に `symmetry`。
   ```yaml
   symmetry:
     axis: center # 軸にする group
     mirror: [[as65550, as65560]] # 軸に対して等距離に置く group の組
   ```
-- 動作: `axis` の列の中心を軸にして、`mirror` の 2 列を左右に等距離に置く。距離は、必要な間隔の大きいほう (広いほうの列に合わせる)。
-- 変更 (案): `spaceOutBlocks` の後に、ブロックの位置を鏡像に補正する処理を足す。`order` との整合 (軸 = 中央の `order`) を検査し、食い違えば警告。
+- 動作: `axis` の列の中心を軸にして、`mirror` の 2 列を左右に等距離に置く。距離は、軸から遠いほうに合わせ、近いほうを外へ動かす (間隔は狭くならない)。
+- 変更: `solve.ts` の `mirrorBlocks`。反復のたびと最後に、列の位置を鏡像に補正し、最後に `spaceOutBlocks` で間隔を取り直す。軸は、軸の列の中心。左右は、現在の位置で決める (`order` との整合の検査と警告は、入れていない)。
 - 範囲: 列の位置の対称まで。列の中のノードの鏡像 (2 つの AS の内部が同じ構造であることが前提) は、この段階では扱わない。
 
 ### 段階 3: 空の行を残す (③) — 実装済み (v0.4.0-dev)
 
-- 書式 (案): プロファイルに `keepEmptyTiers: true`。
-- 動作: `tiers` に書いた tier を、ノードが無くても行として残す (高さは行間のみ)。AS65520 の `core00` を上流 AS の `core01` と同じ高さの tier に置き、間の空の行で、自 AS を中心に上下の行数を揃える。
-- 変更 (案): `slots.ts` の行の決め方、`solve.ts` の y の計算。
+- 書式: プロファイルに `keepEmptyTiers: true`。
+- 動作: `tiers` に書いた tier を、ノードが無くても行として残す (高さは、図でいちばん大きいノードと同じ)。AS65520 の `core00` を上流 AS の `core01` と同じ高さの tier に置き、間の空の行で、自 AS を中心に上下の行数を揃える。
+- 変更: `slots.ts` の行の決め方、`solve.ts` の y の計算。
 - 確認: 空の行にリンクが通るときの経路 (`linkRouter`)。
 
-## 確認したい点 (承認前)
+## 確認した点 (決定)
 
-1. **対称の厳密さ**: ①は列の位置の対称で足りるか。列の中のノードの鏡像まで求めるか (構造が違うと破綻する)。
-2. **書式**: `align` / `symmetry` / `keepEmptyTiers` のキー名と置き場所。
-3. **進め方**: 段階 0 から 1 つずつ実装し、描画で確認してから次へ進むでよいか。
+1. **対称の厳密さ**: ①は列の位置の対称まで (列の中のノードの鏡像までは扱わない)。列の中は ② (`align`) で対称にする。
+2. **書式**: `align` (規則)、`symmetry` / `keepEmptyTiers` (最上位) のキー名と置き場所は、案のとおり。
+3. **進め方**: 段階 0 から 1 つずつ実装し、各段階をコミットして (戻せるようにして) 進めた。
 
 ## 影響と互換性
 
-- 変更するのは `repos/netoviz2` のみ (netomox-exp は YAML → JSON の変換だけで、新しいキーは素通しになる見込み。段階 1 の前に確認する)。
-- `profiles/mddo-fw/asis.yaml` の配置は変わらない (新しいキーを使わない)。回帰は既存テストで見る。
-- バージョン: v0.4.0 (固定値 group) の後続。同じ v0.4.0 に入れるか v0.5.0 にするかは、リリース時に決める。
+- 変更したのは `repos/netoviz2` のみ (netomox-exp は YAML → JSON の変換だけで、新しいキーは素通しになる。確認済み)。
+- `profiles/mddo-fw/asis.yaml` の配置は変わらない (新しいキーを使わない)。回帰は既存テストで確認した。
+- バージョン: 固定値 group と同じ v0.4.0 (`v0.4.0-dev` ブランチ) に入れる。リリースは `release-submodule` の手順で行う (未実施)。
 
 ## 関連
 

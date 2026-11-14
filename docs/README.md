@@ -20,10 +20,12 @@
 
 ## 計画・経緯の記録
 
-| 文書                                                             | 内容                                                    |
-| ---------------------------------------------------------------- | ------------------------------------------------------- |
-| [work/plans/requirements.md](work/plans/requirements.md)         | 要求・設計・実装計画 (開発の途中までの経緯。一部は古い) |
-| [work/plans/schematic_layout.md](work/plans/schematic_layout.md) | schematic レイアウトの計画・判断・進捗の履歴            |
+| 文書                                                                   | 内容                                                                                 |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [work/plans/requirements.md](work/plans/requirements.md)               | 要求・設計・実装計画 (開発の途中までの経緯。一部は古い)                              |
+| [work/plans/schematic_layout.md](work/plans/schematic_layout.md)       | schematic レイアウトの計画・判断・進捗の履歴                                         |
+| [work/plans/group_literal_value.md](work/plans/group_literal_value.md) | 規則の `group` に固定値 `{ value }` を書けるようにする (v0.4.0)                      |
+| [work/plans/symmetry_layout.md](work/plans/symmetry_layout.md)         | schematic レイアウトで対称性を扱う (`align` / `symmetry` / `keepEmptyTiers`。v0.4.0) |
 
 `work/` は、計画 (`plans/`)・調査 (`investigations/`)・やること (`todo/`) の作業メモです。現行の仕様は、上の「設計」にあります。
 

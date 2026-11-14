@@ -35,7 +35,8 @@ ool-mddo の汎用トポロジビューワー (Vite + Vue 3 + TypeScript の SPA
 
 ## schematic レイアウトを触るとき
 
-- プロファイルの書式は [design/profile_format.md](design/profile_format.md)。正本は playground の `profiles/<network>/<名前>.yaml` (YAML)。netomox-exp が JSON に変換して `GET /topologies/:network/netoviz2/profiles` で返し、netoviz2 はそれを読む (**YAML は読まない。コピーを `src/` に置かない**)。どの snapshot・レイヤに使うかは、プロファイルの `target` が決める。テスト用の複製は `src/test/mddoFwProfile.yaml`。
+- プロファイルの書式は [design/profile_format.md](design/profile_format.md)。正本は playground の `profiles/<network>/<名前>.yaml` (YAML)。netomox-exp が JSON に変換して `GET /topologies/:network/netoviz2/profiles` で返し、netoviz2 はそれを読む (**YAML は読まない。コピーを `src/` に置かない**)。どの snapshot・レイヤに使うかは、プロファイルの `target` が決める。テスト用の複製は `src/test/mddoFwProfile.yaml` と `src/test/mddoBgpProfile.yaml` (`profiles/mddo-bgp/asis.yaml` の複製。正本を変えたら同期する)。
 - 配置は、プロファイル → 下位レイヤからの継承 → 名前とリンクからの推論 → stress の順に試す。接続点 (L3 セグメントなど) は、配置の主体ではなく、機器の配置の後に機器の間に置く。`kind` では見分けない。継承するときは「複数の下位ノードに支えられるノード」、下位レイヤの候補が無くプロファイルで配置するときは「階層を持たず、階層を持つ 2 つ以上のノードとつながるノード」が接続点になる (推論と、継承元の配置には後者を使わない: 階層が付かない機器を、例外として報告するため)。
+- 配置の指定は、すべてプロファイルに書く。列 (group) は名前の分解で得た値か固定値 (`group: { value }`)、列の中の左右対称は規則の `align: center`、列どうしの鏡像は最上位の `symmetry`、ノードの無い階層の行は `keepEmptyTiers: true` ([design/profile_format.md](design/profile_format.md))。これらを、ネットワークやユースケースに合わせてコードに入れない。
 - リンクの経路は、描画のたびに現在の位置から `ForceRenderer` が求める (`linkRouter.ts`)。**ノードとポートに重ならないことを、リンクどうしの交差を避けることより優先する。** 直線で済むリンクは直線のままにする。経路は水平・垂直の線分だけ。
 - 純粋な処理 (`annotate`、`slots`、`solve`、`infer`、`inherit`、`connectors`、`linkRouter`) は、純粋関数としてテストを書く。実データから抜き出したフィクスチャは `src/test/` にある (ノード名・リンク・support だけを持つ)。
