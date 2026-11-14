@@ -24,6 +24,12 @@ export interface ProfileRule {
    * order of its nodes (groups without order follow, by name), so put it on the rule which selects the whole group.
    */
   order?: number
+  /**
+   * `center`: the rows of the group (the nodes of the group in a tier) are centered on the axis of the group, so
+   * that the group is left-right symmetric (the order and the minimum gaps in a row are kept). It is a property of
+   * the group: it is on when it is given to any node of the group. Without it, a row follows the links.
+   */
+  align?: 'center'
   /** Pair of the redundant nodes: the nodes which are the same except the value of `by` are a pair */
   pair?: { by: string; primary: string }
 }

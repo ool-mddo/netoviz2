@@ -12,6 +12,8 @@ export interface SlotGroup {
   /** Value of the group ('' for the nodes which belong to no group) */
   key: string
   cells: Map<number, SlotUnit[]>
+  /** The rows of the group are centered on the axis of the group (on when any node of the group has `align: center`) */
+  align?: 'center'
 }
 
 /**
@@ -95,6 +97,12 @@ export function assignSlots(
 
   const rows = [...new Set(units.map((u) => u.row))].sort((a, b) => a - b)
   const groups: SlotGroup[] = groupKeys.map((key) => ({ key, cells: new Map() }))
+  for (const node of nodes) {
+    if (annotations.get(node.id)?.align === 'center') {
+      const group = groups[groupKeys.indexOf(groupOf(node.id))]
+      if (group) group.align = 'center'
+    }
+  }
   for (const { unit, group, row } of units) {
     const cells = groups[group]?.cells
     cells?.set(row, [...(cells.get(row) ?? []), unit])

@@ -98,6 +98,20 @@ rules:
     expect(annotations.get('l/as3-core00')?.group).toBe('as3') // the later rule wins
   })
 
+  it('gives `align` to the nodes selected (the later rule does not remove it)', () => {
+    const profile = profileOf(`
+view: v
+tiers: [x]
+name: '^(?<role>[a-z]+)\\d$'
+rules:
+  - { select: '*', tier: x }
+  - { select: '[role=a]', align: center }
+`)
+    const { annotations } = annotate([node('a1'), node('b1')], profile)
+    expect(annotations.get('l/a1')?.align).toBe('center')
+    expect(annotations.get('l/b1')?.align).toBeUndefined()
+  })
+
   it('selects by ID, name and kind, and reports the nodes without a tier', () => {
     const profile = profileOf(`
 view: v

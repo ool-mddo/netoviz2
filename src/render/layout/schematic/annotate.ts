@@ -12,6 +12,8 @@ export interface NodeAnnotation {
   group?: string
   /** Order of the node among the siblings (smaller = left) */
   order?: number
+  /** The group of the node is left-right symmetric (see `ProfileRule.align`) */
+  align?: 'center'
   /** Redundant pair: nodes with the same `key` are the pair, the primary one is put on the left */
   pair?: { key: string; primary: boolean }
 }
@@ -66,6 +68,7 @@ export function annotate(nodes: readonly SchematicNode[], profile: DiagramProfil
         else annotation.group = group
       }
       if (rule.order !== undefined) annotation.order = rule.order
+      if (rule.align !== undefined) annotation.align = rule.align
       if (rule.pair !== undefined) pairBy.set(node.id, rule.pair)
     }
     annotations.set(node.id, annotation)

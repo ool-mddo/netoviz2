@@ -37,6 +37,22 @@ rules:
     expect(namesOf(layout, nodes)['center']).toEqual({ 1: ['edge-tk01'], 2: ['as9-edge01'] })
   })
 
+  it('marks the group with `align: center` on any node of the group', () => {
+    const profile = parseProfiles(`
+view: v
+tiers: [t]
+name: '^(?<site>[a-z]+)-(?<n>\\d+)$'
+rules:
+  - { select: '*', tier: t, group: site }
+  - { select: '#a-2', align: center }
+`).profiles[0]!
+    const nodes = ['a-1', 'a-2', 'b-1'].map((n) => node(n))
+    expect(slotsOf(nodes, [], profile).groups.map((g) => [g.key, g.align])).toEqual([
+      ['a', 'center'],
+      ['b', undefined],
+    ])
+  })
+
   it('puts the rows by the tier, and the nodes without a tier in the row after the last tier', () => {
     const nodes = [node('a-low-1'), node('a-top-1'), node('stray')]
     const layout = slotsOf(nodes)

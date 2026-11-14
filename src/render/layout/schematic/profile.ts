@@ -12,7 +12,7 @@ export class ProfileError extends Error {}
 // `target` would widen the layers the profile is applied to, so it is checked as well.
 const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'name', 'inherit', 'rules'])
 const KNOWN_TARGET_KEYS = new Set(['network', 'snapshot', 'layer'])
-const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'pair'])
+const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'align', 'pair'])
 const KNOWN_GROUP_KEYS = new Set(['value'])
 const KNOWN_PAIR_KEYS = new Set(['by', 'primary'])
 const KNOWN_INHERIT_KEYS = new Set(['from', 'via'])
@@ -98,6 +98,10 @@ function parseRule(value: unknown, index: number, tiers: readonly string[], warn
       throw new ProfileError(`${where}.order must be a number`)
     }
     rule.order = raw.order
+  }
+  if (raw.align !== undefined) {
+    if (raw.align !== 'center') throw new ProfileError(`${where}.align must be 'center'`)
+    rule.align = 'center'
   }
   if (raw.pair !== undefined) {
     const pair = asRecord(raw.pair, `${where}.pair`)

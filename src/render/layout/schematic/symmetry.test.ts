@@ -53,8 +53,7 @@ describe('mddo-bgp layer3 layout: symmetry', () => {
     expect(at('edge-tk11').x).toBeCloseTo(0, 0)
   })
 
-  // Not satisfied yet (stage 0): it is expected to fail until stage 1 (`align: center`). Then change it to `it`.
-  it.fails('(2) places the devices of an AS symmetrically about the axis of the AS', async () => {
+  it('(2) places the devices of an AS symmetrically about the axis of the AS', async () => {
     const { at } = await arrange()
     for (const as of ['as65550', 'as65560', 'as65520']) {
       const rows = rowsOfAs(at, as, {

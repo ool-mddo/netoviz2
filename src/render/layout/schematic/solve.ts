@@ -123,6 +123,28 @@ export function solvePositions(
   const blocks = layout.groups
     .map((group) => [...group.cells.values()].flatMap((cell) => cell.flatMap((unit) => unit.ids)))
     .filter((ids) => ids.length > 0)
+  // align: center: the rows of the group are centered on the axis of the group (the center of its extent). A row
+  // stays inside the extent, so it does not overlap the other groups; the extent may grow (the widest row is
+  // centered, too), which `spaceOutBlocks` solves by moving the blocks as a whole (it keeps the symmetry).
+  const centerAlignedRows = () => {
+    layout.groups.forEach((group) => {
+      if (group.align !== 'center') return
+      const ids = [...group.cells.values()].flatMap((cell) => cell.flatMap((unit) => unit.ids))
+      if (ids.length === 0) return
+      const axis =
+        (Math.min(...ids.map((id) => (x.get(id) ?? 0) - radius(id))) +
+          Math.max(...ids.map((id) => (x.get(id) ?? 0) + radius(id)))) /
+        2
+      for (const cell of group.cells.values()) {
+        const rowIds = cell.flatMap((unit) => unit.ids)
+        const center =
+          (Math.min(...rowIds.map((id) => (x.get(id) ?? 0) - radius(id))) +
+            Math.max(...rowIds.map((id) => (x.get(id) ?? 0) + radius(id)))) /
+          2
+        for (const id of rowIds) x.set(id, (x.get(id) ?? 0) + axis - center)
+      }
+    })
+  }
   const spaceOutBlocks = () => {
     if (blocks.length < 2) return
     const extents = blocks.map((ids) => ({
@@ -166,9 +188,14 @@ export function solvePositions(
       row.ids.forEach((id, i) => x.set(id, solved[i] ?? 0))
     }
     spaceOutBlocks()
+    centerAlignedRows()
   }
 
   if (opt.initialX) spaceOutBlocks() // the groups are kept apart through all the rows
+  if (layout.groups.some((group) => group.align === 'center')) {
+    centerAlignedRows()
+    spaceOutBlocks()
+  }
 
   // center the diagram on 0
   const xs = [...x.values()]

@@ -69,6 +69,13 @@ describe('parseProfiles', () => {
     expect(warnings).toEqual(["rules[0].group: unknown key 'x' is ignored"])
   })
 
+  it('parses `align: center` and rejects another value', () => {
+    const { profiles, warnings } = parseProfiles("view: v\nrules:\n  - { select: '*', align: center }\n")
+    expect(profiles[0]?.rules[0]).toMatchObject({ align: 'center' })
+    expect(warnings).toEqual([])
+    expect(() => parseProfiles("view: v\nrules:\n  - { select: '*', align: left }\n")).toThrow(ProfileError)
+  })
+
   it('warns about unknown top-level keys (axes, inherit are not supported yet)', () => {
     const { warnings } = parseProfiles('view: v\naxes: { y: tier }\n')
     expect(warnings).toEqual(["unknown key 'axes' is ignored"])

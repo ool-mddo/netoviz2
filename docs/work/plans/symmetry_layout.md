@@ -58,7 +58,7 @@ playground の `profiles/mddo-bgp/asis.yaml` (emulated_asis の layer3) は、AS
 
 → 段階 1 (②) は必要。段階 2 (①) は、この topology では既に成り立っているが、対称でない topology では保証されない (必要性は低い)。段階 3 (③) は必要。
 
-### 段階 1: 行の中央揃え (②)
+### 段階 1: 行の中央揃え (②) — 実装済み (v0.4.0-dev)
 
 - 書式 (案): group を単位に `align: center`。
   ```yaml
