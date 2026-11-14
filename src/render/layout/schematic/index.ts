@@ -131,7 +131,10 @@ function arrangeByProfile(
     : new Set<string>()
   const devices = nodes.filter((node) => !connectorIds.has(node.id))
   const deviceLinks = links.filter((l) => !connectorIds.has(l.source) && !connectorIds.has(l.target))
-  const slots = assignSlots(devices, annotated, deviceLinks, { unclassifiedRow: profile.tiers.length })
+  const slots = assignSlots(devices, annotated, deviceLinks, {
+    unclassifiedRow: profile.tiers.length,
+    ...(profile.keepEmptyTiers ? { keepTiers: profile.tiers.length } : {}),
+  })
   const placed = solvePositions(devices, slots, deviceLinks)
   const positions =
     connectorIds.size === 0

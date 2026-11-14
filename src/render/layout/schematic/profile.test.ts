@@ -76,6 +76,12 @@ describe('parseProfiles', () => {
     expect(() => parseProfiles("view: v\nrules:\n  - { select: '*', align: left }\n")).toThrow(ProfileError)
   })
 
+  it('parses keepEmptyTiers (true or false only)', () => {
+    expect(parseProfiles('view: v\nkeepEmptyTiers: true\n').profiles[0]?.keepEmptyTiers).toBe(true)
+    expect(parseProfiles('view: v\n').profiles[0]?.keepEmptyTiers).toBeUndefined()
+    expect(() => parseProfiles('view: v\nkeepEmptyTiers: yes please\n')).toThrow(ProfileError)
+  })
+
   it('warns about unknown top-level keys (axes, inherit are not supported yet)', () => {
     const { warnings } = parseProfiles('view: v\naxes: { y: tier }\n')
     expect(warnings).toEqual(["unknown key 'axes' is ignored"])

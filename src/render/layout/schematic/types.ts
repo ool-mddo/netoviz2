@@ -45,6 +45,11 @@ export interface DiagramProfile {
   target: { network?: string; snapshot?: RegExp; layer?: string }
   /** Names of the tiers from the top (upstream) to the bottom */
   tiers: string[]
+  /**
+   * Keep the tiers which no node is in as (empty) rows, so that the rows keep their places: e.g. the upstream side and
+   * the downstream side of a diagram have the same numbers of rows (default: the rows without nodes are dropped)
+   */
+  keepEmptyTiers?: boolean
   /** Regular expression with named groups to split the name of a node (matched against `name`, not the ID) */
   name?: RegExp
   /** The layer whose group / tier / order are inherited through the supports (default: found automatically) */

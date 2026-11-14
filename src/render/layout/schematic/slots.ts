@@ -35,6 +35,8 @@ export interface SlotOptions {
    * the barycenter method does not change it: the arrangement is the same as the one of the lower layer.
    */
   hints?: ReadonlyMap<string, number>
+  /** Number of the tiers: the rows 0 .. keepTiers - 1 are kept even if no node is in them (`keepEmptyTiers`) */
+  keepTiers?: number
 }
 
 const SWEEPS = 6
@@ -63,7 +65,7 @@ export function assignSlots(
   nodes: readonly SchematicNode[],
   { annotations }: Annotated,
   links: ReadonlyArray<{ source: string; target: string }>,
-  { unclassifiedRow, hints }: SlotOptions,
+  { unclassifiedRow, hints, keepTiers }: SlotOptions,
 ): SlotLayout {
   const nameOf = new Map(nodes.map((node) => [node.id, node.name]))
   const rowOf = (id: string) => annotations.get(id)?.tierIndex ?? unclassifiedRow
@@ -95,7 +97,8 @@ export function assignSlots(
     })
   }
 
-  const rows = [...new Set(units.map((u) => u.row))].sort((a, b) => a - b)
+  const kept = Array.from({ length: keepTiers ?? 0 }, (_, i) => i)
+  const rows = [...new Set([...kept, ...units.map((u) => u.row)])].sort((a, b) => a - b)
   const groups: SlotGroup[] = groupKeys.map((key) => ({ key, cells: new Map() }))
   for (const node of nodes) {
     if (annotations.get(node.id)?.align === 'center') {

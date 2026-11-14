@@ -78,8 +78,9 @@ export function solvePositions(
   // y: the rows from the top
   const y = new Map<string, number>()
   let top = 0
+  const emptyHalf = Math.max(0, ...nodes.map((node) => node.radius)) // an empty row (`keepEmptyTiers`) is as high as the largest
   for (const row of rows) {
-    const half = Math.max(0, ...row.ids.map(radius))
+    const half = row.ids.length === 0 ? emptyHalf : Math.max(0, ...row.ids.map(radius))
     const center = top + half
     for (const id of row.ids) y.set(id, center)
     top = center + half + opt.rowGap

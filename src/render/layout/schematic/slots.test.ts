@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { parseProfiles } from '../../../test/profileYaml'
 import { assignSlots } from './slots'
-import { NO_PAIR_PROFILE, linkOf, namesOf, node, slotsOf } from './testing'
+import { NO_PAIR_PROFILE, SITE_ROLE_PROFILE, linkOf, namesOf, node, slotsOf } from './testing'
+import { annotate } from './annotate'
 
 describe('assignSlots', () => {
   it('orders the groups by order, then the groups without order by name, and the nodes without group last', () => {
@@ -51,6 +52,22 @@ rules:
       ['a', 'center'],
       ['b', undefined],
     ])
+  })
+
+  it('keeps the rows of the tiers without nodes with keepTiers (rows 0 .. keepTiers - 1)', () => {
+    const nodes = [node('a-top-1'), node('a-low-1')]
+    const profile = SITE_ROLE_PROFILE
+    const annotated = annotate(nodes, profile)
+    const options = { unclassifiedRow: profile.tiers.length }
+    expect(assignSlots(nodes, annotated, [], options).rows).toEqual([0, 2])
+    expect(assignSlots(nodes, annotated, [], { ...options, keepTiers: 3 }).rows).toEqual([0, 1, 2])
+    // the row for the nodes without a tier is added only when it is used
+    expect(
+      assignSlots([...nodes, node('stray')], annotate([...nodes, node('stray')], profile), [], {
+        ...options,
+        keepTiers: 3,
+      }).rows,
+    ).toEqual([0, 1, 2, 3])
   })
 
   it('puts the rows by the tier, and the nodes without a tier in the row after the last tier', () => {

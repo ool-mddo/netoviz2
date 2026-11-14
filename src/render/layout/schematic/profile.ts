@@ -10,7 +10,7 @@ export class ProfileError extends Error {}
 
 // Unknown keys (e.g. the keys of the design which are not supported yet) are ignored with a warning: a typo in
 // `target` would widen the layers the profile is applied to, so it is checked as well.
-const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'name', 'inherit', 'rules'])
+const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'keepEmptyTiers', 'name', 'inherit', 'rules'])
 const KNOWN_TARGET_KEYS = new Set(['network', 'snapshot', 'layer'])
 const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'align', 'pair'])
 const KNOWN_GROUP_KEYS = new Set(['value'])
@@ -160,6 +160,11 @@ export function parseProfile(value: unknown, warnings: string[]): DiagramProfile
   const rules = rulesRaw.map((rule, i) => parseRule(rule, i, tiers, warnings))
   const profile: DiagramProfile = { view, target, tiers, rules }
   if (inherit) profile.inherit = inherit
+  if (raw.keepEmptyTiers !== undefined) {
+    if (typeof raw.keepEmptyTiers !== 'boolean')
+      throw new ProfileError('keepEmptyTiers must be true or false')
+    profile.keepEmptyTiers = raw.keepEmptyTiers
+  }
   if (name) profile.name = name
   return profile
 }

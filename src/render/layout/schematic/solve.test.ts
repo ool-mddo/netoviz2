@@ -16,6 +16,22 @@ const solve = (names: string[], links: Array<[string, string]> = [], radius?: Re
   return (name: string) => positions.get(`l/${name}`)!
 }
 
+describe('solvePositions: empty rows (keepEmptyTiers)', () => {
+  it('keeps the place of an empty row: as high as the largest node', () => {
+    const nodes = [node('a-top-1'), node('a-low-1')]
+    const slots = slotsOf(nodes)
+    const kept = { ...slots, rows: [0, 1, 2] }
+    const at = (layout: typeof slots) => {
+      const positions = solvePositions(nodes, layout, [])
+      return (name: string) => positions.get(`l/${name}`)!
+    }
+    const [plain, withEmpty] = [at(slots), at(kept)]
+    // top (11) + rowGap (120) + low (11) in the plain layout; an empty row (22 high) between them in the other
+    expect(plain('a-low-1').y - plain('a-top-1').y).toBeCloseTo(11 + 120 + 11, 6)
+    expect(withEmpty('a-low-1').y - withEmpty('a-top-1').y).toBeCloseTo(11 + 120 + 11 + 11 + 120 + 11, 6)
+  })
+})
+
 describe('solvePositions: align center', () => {
   // group a: top row has 1 node (linked to the 3 nodes of the low row, which are pulled to the left by group b's links)
   const profile = parseProfiles(`

@@ -53,6 +53,17 @@ describe('mddo-bgp layer3 layout: symmetry', () => {
     expect(at('edge-tk11').x).toBeCloseTo(0, 0)
   })
 
+  it('(3) puts the upstream rows and the downstream rows at the same distances from the own AS (empty tier kept)', async () => {
+    const { at } = await arrange()
+    const center = at('core-tk01').y
+    // the own AS: edge (up) - core - edge (down)
+    expect(center - at('edge-tk01').y).toBeCloseTo(at('edge-tk11').y - center, 3)
+    // upstream edge / core00 / (core01) / endpoint vs downstream edge / core00 / (empty) / endpoint
+    expect(center - at('as65550-edge01').y).toBeCloseTo(at('as65520-edge01').y - center, 3)
+    expect(center - at('as65550-core00').y).toBeCloseTo(at('as65520-core00').y - center, 3)
+    expect(center - at('as65550-endpoint00').y).toBeCloseTo(at('as65520-endpoint00').y - center, 3)
+  })
+
   it('(2) places the devices of an AS symmetrically about the axis of the AS', async () => {
     const { at } = await arrange()
     for (const as of ['as65550', 'as65560', 'as65520']) {
