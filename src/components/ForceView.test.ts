@@ -203,7 +203,9 @@ describe('ForceView', () => {
       current = wrapper
       expect(wrapper.find('[data-testid=drag-hint]').exists()).toBe(false)
       await wrapper.setProps({ engine: 'schematic' })
-      expect(wrapper.get('[data-testid=drag-hint]').text()).toMatch(/Shift\+drag.*row.*Ctrl.*column/)
+      expect(wrapper.get('[data-testid=drag-hint]').text()).toMatch(
+        /Shift\+drag.*row.*vertically.*Ctrl.*column.*horizontally/,
+      )
     })
 
     it('arranges again with the new engine when the engine is changed', async () => {

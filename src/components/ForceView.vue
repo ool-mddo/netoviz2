@@ -422,7 +422,8 @@ function onEngineChange(event: Event): void {
           arranging ? 'arranging...' : statsText
         }}</span>
         <span v-if="engine === 'schematic'" class="hint" data-testid="drag-hint"
-          >Drag: move a node (20px grid) · Shift+drag: its row · Ctrl/⌘+drag: its column</span
+          >Drag: move a node (20px grid) · Shift+drag: its row (vertically) · Ctrl/⌘+drag: its column
+          (horizontally)</span
         >
         <span v-if="profileError" class="error" data-testid="profile-error">{{ profileError }}</span>
       </div>
