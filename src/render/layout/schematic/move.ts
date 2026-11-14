@@ -32,6 +32,16 @@ export function snapDelta(delta: Position, grid: number): Position {
 }
 
 /**
+ * Limit the direction of the movement: a row (same y) moves only vertically, a column (same x) only horizontally
+ * (so that the line stays a line). A node moves freely.
+ */
+export function constrainDelta(delta: Position, scope: MoveScope): Position {
+  if (scope === 'row') return { x: 0, y: delta.y }
+  if (scope === 'column') return { x: delta.x, y: 0 }
+  return delta
+}
+
+/**
  * The nodes which move with the dragged node: the devices in its row / column of the layer, and the devices of the
  * other layers which follow them (the arrangement is inherited) or which they follow when the device is the only one
  * which follows the node (the same node in the diagrams of the layers). A node which follows a node supporting many

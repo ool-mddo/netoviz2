@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Position } from '../types'
-import { moveNodes, movingNodes, snapDelta, type MoveRequest } from './move'
+import { constrainDelta, moveNodes, movingNodes, snapDelta, type MoveRequest } from './move'
 import type { SchematicStructure } from './types'
 
 const node = (id: string) => ({ id, name: id, radius: 11 })
@@ -67,6 +67,14 @@ describe('snapDelta', () => {
   it('rounds the movement to the grid', () => {
     expect(snapDelta(at(14, -26), 20)).toEqual(at(20, -20))
     expect(snapDelta(at(14, -26), 0)).toEqual(at(14, -26))
+  })
+})
+
+describe('constrainDelta', () => {
+  it('moves a row only vertically and a column only horizontally', () => {
+    expect(constrainDelta(at(14, -26), 'row')).toEqual(at(0, -26))
+    expect(constrainDelta(at(14, -26), 'column')).toEqual(at(14, 0))
+    expect(constrainDelta(at(14, -26), 'node')).toEqual(at(14, -26))
   })
 })
 
