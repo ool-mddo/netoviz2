@@ -603,11 +603,20 @@ describe('ForceRenderer', () => {
         })
 
         it('moves the nodes in the row with the shift key, and the nodes in the column with the control key', async () => {
-          const row = await drag({ shiftKey: true }, 20, 0)
-          expect(row.after.a[0] - row.before.a[0]).toBe(20)
-          expect(row.after.b[0] - row.before.b[0]).toBe(20) // (a and b are in the same row)
+          const row = await drag({ shiftKey: true }, 0, 20)
+          expect(row.after.a[1] - row.before.a[1]).toBe(20)
+          expect(row.after.b[1] - row.before.b[1]).toBe(20) // (a and b are in the same row)
           const column = await drag({ ctrlKey: true }, 20, 0)
           expect(column.after.b).toEqual(column.before.b) // (b is not in the column of a)
+        })
+
+        it('moves a row only vertically and a column only horizontally', async () => {
+          const row = await drag({ shiftKey: true }, 20, 20)
+          expect(row.after.a[0]).toBe(row.before.a[0])
+          expect(row.after.a[1] - row.before.a[1]).toBe(20)
+          const column = await drag({ ctrlKey: true }, 20, 20)
+          expect(column.after.a[0] - column.before.a[0]).toBe(20)
+          expect(column.after.a[1]).toBe(column.before.a[1])
         })
       })
 
