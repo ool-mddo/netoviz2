@@ -26,6 +26,46 @@ export interface LoadedProfiles extends ParsedProfiles {
   entries: LoadedProfile[]
 }
 
+/** A profile file which can be chosen (`?profile=<name>`) for the network / snapshot */
+export interface ProfileChoice {
+  /** Name of the file */
+  name: string
+  /** At least one document of the file applies to the network / snapshot (the target accepts it) */
+  applies: boolean
+  /** Why the file cannot be used (broken file or document), if it cannot */
+  error?: string
+}
+
+/**
+ * The profile files of the network as choices, in the order of the names. A file which is broken, or none of whose
+ * documents applies to the network / snapshot (the snapshot may be unknown: then it is not checked), is `applies: false`.
+ */
+export async function profileChoices(
+  network: string,
+  source: ProfileSource,
+  snapshot?: string,
+): Promise<ProfileChoice[]> {
+  const files = [...(await source(network))].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  const choices: ProfileChoice[] = []
+  for (const file of files) {
+    try {
+      // the same check as a named profile (`?profile=<name>`): the file must be valid and apply
+      const loaded = await loadProfiles(network, () => Promise.resolve([file]), {
+        name: file.name,
+        ...(snapshot === undefined ? {} : { snapshot }),
+      })
+      choices.push({ name: file.name, applies: loaded.entries.length > 0 })
+    } catch (error) {
+      choices.push({
+        name: file.name,
+        applies: false,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  return choices
+}
+
 /**
  * Load the profiles of the network which apply to the network / snapshot, in the order of the files (by the name) and
  * of the documents in them. Without `options.name` a broken file or document is a warning (the other ones are used);

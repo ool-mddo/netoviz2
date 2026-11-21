@@ -15,10 +15,21 @@ export interface ProfileRule {
   /** Name of the captured value (see `DiagramProfile.name`) which is the group (e.g. site) of the node */
   group?: string
   /**
+   * A literal value of the group (the rule is written as `group: { value: <value> }`): nodes given the same value
+   * are one group even if their names are not split into the same captured value. Mutually exclusive with `group`.
+   */
+  groupValue?: string
+  /**
    * Order of the group the node belongs to among the groups (smaller = left). A group is ordered by the smallest
    * order of its nodes (groups without order follow, by name), so put it on the rule which selects the whole group.
    */
   order?: number
+  /**
+   * `center`: the rows of the group (the nodes of the group in a tier) are centered on the axis of the group, so
+   * that the group is left-right symmetric (the order and the minimum gaps in a row are kept). It is a property of
+   * the group: it is on when it is given to any node of the group. Without it, a row follows the links.
+   */
+  align?: 'center'
   /** Pair of the redundant nodes: the nodes which are the same except the value of `by` are a pair */
   pair?: { by: string; primary: string }
 }
@@ -34,6 +45,16 @@ export interface DiagramProfile {
   target: { network?: string; snapshot?: RegExp; layer?: string }
   /** Names of the tiers from the top (upstream) to the bottom */
   tiers: string[]
+  /**
+   * Keep the tiers which no node is in as (empty) rows, so that the rows keep their places: e.g. the upstream side and
+   * the downstream side of a diagram have the same numbers of rows (default: the rows without nodes are dropped)
+   */
+  keepEmptyTiers?: boolean
+  /**
+   * Mirror symmetry of the groups (columns): each pair of `mirror` is put at the same distance on both sides of the
+   * `axis` group (the groups are the values of the groups of the nodes, see `ProfileRule.group`)
+   */
+  symmetry?: { axis: string; mirror: Array<[string, string]> }
   /** Regular expression with named groups to split the name of a node (matched against `name`, not the ID) */
   name?: RegExp
   /** The layer whose group / tier / order are inherited through the supports (default: found automatically) */

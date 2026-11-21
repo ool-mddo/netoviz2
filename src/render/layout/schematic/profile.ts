@@ -10,9 +10,20 @@ export class ProfileError extends Error {}
 
 // Unknown keys (e.g. the keys of the design which are not supported yet) are ignored with a warning: a typo in
 // `target` would widen the layers the profile is applied to, so it is checked as well.
-const KNOWN_TOP_KEYS = new Set(['view', 'target', 'tiers', 'name', 'inherit', 'rules'])
+const KNOWN_TOP_KEYS = new Set([
+  'view',
+  'target',
+  'tiers',
+  'keepEmptyTiers',
+  'symmetry',
+  'name',
+  'inherit',
+  'rules',
+])
 const KNOWN_TARGET_KEYS = new Set(['network', 'snapshot', 'layer'])
-const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'pair'])
+const KNOWN_RULE_KEYS = new Set(['select', 'tier', 'group', 'order', 'align', 'pair'])
+const KNOWN_GROUP_KEYS = new Set(['value'])
+const KNOWN_SYMMETRY_KEYS = new Set(['axis', 'mirror'])
 const KNOWN_PAIR_KEYS = new Set(['by', 'primary'])
 const KNOWN_INHERIT_KEYS = new Set(['from', 'via'])
 
@@ -80,12 +91,27 @@ function parseRule(value: unknown, index: number, tiers: readonly string[], warn
     rule.tier = asString(raw.tier, `${where}.tier`)
     if (!tiers.includes(rule.tier)) throw new ProfileError(`${where}.tier '${rule.tier}' is not in tiers`)
   }
-  if (raw.group !== undefined) rule.group = asString(raw.group, `${where}.group`)
+  if (raw.group !== undefined) {
+    if (typeof raw.group === 'object' && raw.group !== null && !Array.isArray(raw.group)) {
+      // `group: { value: <literal> }`: a group value which is not captured from the name
+      const group = raw.group as Record<string, unknown>
+      warnUnknownKeys(group, KNOWN_GROUP_KEYS, `${where}.group: `, warnings)
+      const value = asQuotedString(group.value, `${where}.group.value`)
+      if (value === '') throw new ProfileError(`${where}.group.value must not be empty`)
+      rule.groupValue = value
+    } else {
+      rule.group = asString(raw.group, `${where}.group`)
+    }
+  }
   if (raw.order !== undefined) {
     if (typeof raw.order !== 'number' || !Number.isFinite(raw.order)) {
       throw new ProfileError(`${where}.order must be a number`)
     }
     rule.order = raw.order
+  }
+  if (raw.align !== undefined) {
+    if (raw.align !== 'center') throw new ProfileError(`${where}.align must be 'center'`)
+    rule.align = 'center'
   }
   if (raw.pair !== undefined) {
     const pair = asRecord(raw.pair, `${where}.pair`)
@@ -144,6 +170,24 @@ export function parseProfile(value: unknown, warnings: string[]): DiagramProfile
   const rules = rulesRaw.map((rule, i) => parseRule(rule, i, tiers, warnings))
   const profile: DiagramProfile = { view, target, tiers, rules }
   if (inherit) profile.inherit = inherit
+  if (raw.symmetry !== undefined) {
+    const symmetry = asRecord(raw.symmetry, 'symmetry')
+    warnUnknownKeys(symmetry, KNOWN_SYMMETRY_KEYS, 'symmetry: ', warnings)
+    const mirrorRaw = symmetry.mirror ?? []
+    if (!Array.isArray(mirrorRaw)) throw new ProfileError('symmetry.mirror must be a list of pairs')
+    const mirror = mirrorRaw.map((pair, i): [string, string] => {
+      if (!Array.isArray(pair) || pair.length !== 2) {
+        throw new ProfileError(`symmetry.mirror[${i}] must be a pair of two group values`)
+      }
+      return [asString(pair[0], `symmetry.mirror[${i}][0]`), asString(pair[1], `symmetry.mirror[${i}][1]`)]
+    })
+    profile.symmetry = { axis: asString(symmetry.axis, 'symmetry.axis'), mirror }
+  }
+  if (raw.keepEmptyTiers !== undefined) {
+    if (typeof raw.keepEmptyTiers !== 'boolean')
+      throw new ProfileError('keepEmptyTiers must be true or false')
+    profile.keepEmptyTiers = raw.keepEmptyTiers
+  }
   if (name) profile.name = name
   return profile
 }

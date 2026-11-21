@@ -151,7 +151,7 @@ flowchart TB
 
 - **要素:** ノードは円、term-point (展開したとき) はノードの円周上のポート、リンクは線 (束ねた複数のリンクは 1 本)。ノードの半径は、ポートの数で決まる。
 - **ポート:** 優先順位は、ユーザーがドラッグしたポート > 直線のリンクのポート (相手ノードの中心の方向。同じノード間の複数のリンクは平行に並べる) > それ以外 (迂回するリンクのポート、リンクの無いポート。他を動かさず空き位置に置く)。最小の間隔は弧の長さ 14px (`domain/ports.ts`、[design/layout.md](design/layout.md))。
-- **操作:** ズーム・移動 (d3-zoom)、ノードのドラッグ (schematic は、シミュレーションを使わず、20px のグリッドに丸めて動かす。Shift = 行、Ctrl/⌘ = 列。[design/schematic_layout.md](design/schematic_layout.md) の「手で動かす」)、ポートのドラッグ (円周上)、クリック (選択)、ダブルクリック (term-point の展開)、ホバー (相手のポートや support の先を強調)。
+- **操作:** ズーム・移動 (d3-zoom)、ノードのドラッグ (schematic は、シミュレーションを使わず、20px のグリッドに丸めて動かす。Shift = 行 (縦方向だけ)、Ctrl/⌘ = 列 (横方向だけ)。[design/schematic_layout.md](design/schematic_layout.md) の「手で動かす」)、ポートのドラッグ (円周上)、クリック (選択)、ダブルクリック (term-point の展開)、ホバー (相手のポートや support の先を強調)。
 - **レイアウトの実行:** 表示するレイヤが全部読み込まれてから、レイヤごとに配置して、並べる (`layout/pack.ts`)。並べ方は、既定が縦 1 列 (中央揃え)、`?layerlayout=grid` (または画面の Layers セレクト) で格子 (`ceil(sqrt(レイヤ数))` 列)。force エンジンは、レイヤ中心 (`layerCenter`) へ引く力で同じ並びにする。同じグラフは配置し直さない。
 - **強調:** 選択・トレース・ホバーを、CSS のクラス (`selected` `traced` `peer` `dim` など) で表す。
 

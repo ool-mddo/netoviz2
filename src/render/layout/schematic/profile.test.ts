@@ -48,6 +48,69 @@ describe('parseProfiles', () => {
     expect(warnings).toEqual(["rules[4]: unknown key 'shape' is ignored"])
   })
 
+  it('parses `group: { value }` as a literal group value (and `group: name` as a captured one)', () => {
+    const { profiles, warnings } = parseProfiles(
+      "view: v\nrules:\n  - { select: '*', group: { value: core } }\n  - { select: '*', group: site }\n",
+    )
+    expect(profiles[0]?.rules[0]).toMatchObject({ groupValue: 'core' })
+    expect(profiles[0]?.rules[0]?.group).toBeUndefined()
+    expect(profiles[0]?.rules[1]).toMatchObject({ group: 'site' })
+    expect(profiles[0]?.rules[1]?.groupValue).toBeUndefined()
+    expect(warnings).toEqual([])
+  })
+
+  it('rejects an invalid `group: { value }` (missing, empty, not a string) and warns about unknown keys', () => {
+    for (const group of ['{}', "{ value: '' }", '{ value: 1 }']) {
+      expect(() => parseProfiles(`view: v\nrules:\n  - { select: '*', group: ${group} }\n`)).toThrow(
+        ProfileError,
+      )
+    }
+    const { warnings } = parseProfiles("view: v\nrules:\n  - { select: '*', group: { value: a, x: 1 } }\n")
+    expect(warnings).toEqual(["rules[0].group: unknown key 'x' is ignored"])
+  })
+
+  it('parses `align: center` and rejects another value', () => {
+    const { profiles, warnings } = parseProfiles("view: v\nrules:\n  - { select: '*', align: center }\n")
+    expect(profiles[0]?.rules[0]).toMatchObject({ align: 'center' })
+    expect(warnings).toEqual([])
+    expect(() => parseProfiles("view: v\nrules:\n  - { select: '*', align: left }\n")).toThrow(ProfileError)
+  })
+
+  it('parses keepEmptyTiers (true or false only)', () => {
+    expect(parseProfiles('view: v\nkeepEmptyTiers: true\n').profiles[0]?.keepEmptyTiers).toBe(true)
+    expect(parseProfiles('view: v\n').profiles[0]?.keepEmptyTiers).toBeUndefined()
+    expect(() => parseProfiles('view: v\nkeepEmptyTiers: yes please\n')).toThrow(ProfileError)
+  })
+
+  it('parses symmetry (the axis group and the pairs of groups put on both sides of it)', () => {
+    const { profiles, warnings } = parseProfiles(
+      'view: v\nsymmetry: { axis: center, mirror: [[a, b], [c, d]] }\n',
+    )
+    expect(profiles[0]?.symmetry).toEqual({
+      axis: 'center',
+      mirror: [
+        ['a', 'b'],
+        ['c', 'd'],
+      ],
+    })
+    expect(warnings).toEqual([])
+    expect(parseProfiles('view: v\nsymmetry: { axis: c }\n').profiles[0]?.symmetry).toEqual({
+      axis: 'c',
+      mirror: [],
+    })
+    for (const symmetry of [
+      '{ mirror: [[a, b]] }',
+      '{ axis: c, mirror: [[a]] }',
+      '{ axis: c, mirror: a }',
+      'x',
+    ]) {
+      expect(() => parseProfiles(`view: v\nsymmetry: ${symmetry}\n`)).toThrow(ProfileError)
+    }
+    expect(parseProfiles('view: v\nsymmetry: { axis: c, x: 1 }\n').warnings).toEqual([
+      "symmetry: unknown key 'x' is ignored",
+    ])
+  })
+
   it('warns about unknown top-level keys (axes, inherit are not supported yet)', () => {
     const { warnings } = parseProfiles('view: v\naxes: { y: tier }\n')
     expect(warnings).toEqual(["unknown key 'axes' is ignored"])

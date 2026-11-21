@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { parseProfiles } from '../../../test/profileYaml'
 import { assignSlots } from './slots'
-import { NO_PAIR_PROFILE, linkOf, namesOf, node, slotsOf } from './testing'
+import { NO_PAIR_PROFILE, SITE_ROLE_PROFILE, linkOf, namesOf, node, slotsOf } from './testing'
+import { annotate } from './annotate'
 
 describe('assignSlots', () => {
   it('orders the groups by order, then the groups without order by name, and the nodes without group last', () => {
@@ -17,6 +18,56 @@ rules:
 `).profiles[0]!
     const nodes = ['z-1', 'm-1', 'b-1', 'nogroup'].map((n) => node(n))
     expect(slotsOf(nodes, [], profile).groups.map((g) => g.key)).toEqual(['b', 'm', 'z', ''])
+  })
+
+  it('puts the groups of a literal value (`group: { value }`) in one column between the groups by order (Y shape)', () => {
+    const profile = parseProfiles(`
+view: v
+tiers: [up, own, down]
+name: '^(?:(?<site>as\\d+)-)?(?<role>[a-z]+)(?:-(?<tk>tk))?(?<n>\\d+)$'
+rules:
+  - { select: '*', group: site }
+  - { select: '[tk=tk]', group: { value: center }, tier: own, order: 2 }
+  - { select: '[site=as9]', group: { value: center }, tier: down }
+  - { select: '[site=as1]', tier: up, order: 1 }
+  - { select: '[site=as3]', tier: up, order: 3 }
+`).profiles[0]!
+    const nodes = ['as1-edge01', 'as3-edge01', 'edge-tk01', 'as9-edge01'].map((n) => node(n))
+    const layout = slotsOf(nodes, [], profile)
+    expect(layout.groups.map((g) => g.key)).toEqual(['as1', 'center', 'as3'])
+    expect(namesOf(layout, nodes)['center']).toEqual({ 1: ['edge-tk01'], 2: ['as9-edge01'] })
+  })
+
+  it('marks the group with `align: center` on any node of the group', () => {
+    const profile = parseProfiles(`
+view: v
+tiers: [t]
+name: '^(?<site>[a-z]+)-(?<n>\\d+)$'
+rules:
+  - { select: '*', tier: t, group: site }
+  - { select: '#a-2', align: center }
+`).profiles[0]!
+    const nodes = ['a-1', 'a-2', 'b-1'].map((n) => node(n))
+    expect(slotsOf(nodes, [], profile).groups.map((g) => [g.key, g.align])).toEqual([
+      ['a', 'center'],
+      ['b', undefined],
+    ])
+  })
+
+  it('keeps the rows of the tiers without nodes with keepTiers (rows 0 .. keepTiers - 1)', () => {
+    const nodes = [node('a-top-1'), node('a-low-1')]
+    const profile = SITE_ROLE_PROFILE
+    const annotated = annotate(nodes, profile)
+    const options = { unclassifiedRow: profile.tiers.length }
+    expect(assignSlots(nodes, annotated, [], options).rows).toEqual([0, 2])
+    expect(assignSlots(nodes, annotated, [], { ...options, keepTiers: 3 }).rows).toEqual([0, 1, 2])
+    // the row for the nodes without a tier is added only when it is used
+    expect(
+      assignSlots([...nodes, node('stray')], annotate([...nodes, node('stray')], profile), [], {
+        ...options,
+        keepTiers: 3,
+      }).rows,
+    ).toEqual([0, 1, 2, 3])
   })
 
   it('puts the rows by the tier, and the nodes without a tier in the row after the last tier', () => {

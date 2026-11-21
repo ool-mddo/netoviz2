@@ -22,7 +22,7 @@ import { layoutSchematic } from './layout/schematic'
 import { routeAround, type Obstacle, type RouteEnd, type RouteRequest } from './linkRouter'
 import { roundedPolyline } from './path'
 import { selectProfile } from './layout/schematic/profile'
-import { movingNodes, moveNodes, snapDelta, type MoveScope } from './layout/schematic/move'
+import { constrainDelta, movingNodes, moveNodes, snapDelta, type MoveScope } from './layout/schematic/move'
 import type {
   DiagramProfile,
   SchematicBase,
@@ -954,8 +954,8 @@ export class ForceRenderer {
   }
 
   /**
-   * (schematic layout) Move the dragged node by hand, rounded to the grid. Shift: the nodes in the row, Ctrl / Meta:
-   * the nodes in the column. The devices which follow it in the other layers move with it, and the connection points
+   * (schematic layout) Move the dragged node by hand, rounded to the grid. Shift: the nodes in the row (only vertically), Ctrl / Meta:
+   * the nodes in the column (only horizontally). The devices which follow it in the other layers move with it, and the connection points
    * are put between the devices again. (The others are not moved: the layout is not moved by the simulation.)
    */
   private manualMove(d: Item, x: number, y: number, mouse?: MouseEvent): void {
@@ -964,7 +964,10 @@ export class ForceRenderer {
     const scope = this.scopeOf(mouse?.shiftKey ?? false, (mouse?.ctrlKey || mouse?.metaKey) ?? false)
     this.keys = { shift: scope === 'row', ctrl: scope === 'column' }
     this.showWillMove()
-    const delta = snapDelta({ x: x - from.start.x, y: y - from.start.y }, SCHEMATIC_GRID)
+    const delta = constrainDelta(
+      snapDelta({ x: x - from.start.x, y: y - from.start.y }, SCHEMATIC_GRID),
+      scope,
+    )
     const isConnector = this.structures.get(d.layer)?.connectors.some((c) => c.id === d.id) ?? false
     if (isConnector) this.pinnedConnectors.add(d.id)
     const moved = moveNodes({

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { solvePositions } from './solve'
 import { linkOf, node, slotsOf } from './testing'
+import { parseProfiles } from '../../../test/profileYaml'
 
 const solve = (names: string[], links: Array<[string, string]> = [], radius?: Record<string, number>) => {
   const nodes = names.map((n) => ({ ...node(n), radius: radius?.[n] ?? 11 }))
@@ -14,6 +15,120 @@ const solve = (names: string[], links: Array<[string, string]> = [], radius?: Re
   )
   return (name: string) => positions.get(`l/${name}`)!
 }
+
+describe('solvePositions: empty rows (keepEmptyTiers)', () => {
+  it('keeps the place of an empty row: as high as the largest node', () => {
+    const nodes = [node('a-top-1'), node('a-low-1')]
+    const slots = slotsOf(nodes)
+    const kept = { ...slots, rows: [0, 1, 2] }
+    const at = (layout: typeof slots) => {
+      const positions = solvePositions(nodes, layout, [])
+      return (name: string) => positions.get(`l/${name}`)!
+    }
+    const [plain, withEmpty] = [at(slots), at(kept)]
+    // top (11) + rowGap (120) + low (11) in the plain layout; an empty row (22 high) between them in the other
+    expect(plain('a-low-1').y - plain('a-top-1').y).toBeCloseTo(11 + 120 + 11, 6)
+    expect(withEmpty('a-low-1').y - withEmpty('a-top-1').y).toBeCloseTo(11 + 120 + 11 + 11 + 120 + 11, 6)
+  })
+})
+
+describe('solvePositions: symmetry (mirror)', () => {
+  // groups a | b | c in this order; c is wider (3 nodes in the low row) than a (1 node), so the centers of the
+  // groups are not at the same distances from b without the symmetry
+  const nodes = ['a-top-1', 'b-top-1', 'c-top-1', 'c-low-1', 'c-low-2', 'c-low-3'].map((n) => node(n))
+  const profile = parseProfiles(`
+view: v
+tiers: [top, low]
+name: '^(?<site>[a-z]+)-(?<role>[a-z]+)-(?<index>\\d+)$'
+rules:
+  - { select: '*', group: site }
+  - { select: '[role=top]', tier: top }
+  - { select: '[role=low]', tier: low }
+  - { select: '[site=a]', order: 1 }
+  - { select: '[site=b]', order: 2 }
+  - { select: '[site=c]', order: 3 }
+`).profiles[0]!
+  const centers = (symmetry?: { axis: string; mirror: Array<[string, string]> }) => {
+    const positions = solvePositions(nodes, slotsOf(nodes, [], profile), [], symmetry ? { symmetry } : {})
+    const center = (site: string) => {
+      const xs = nodes.filter((n) => n.name.startsWith(`${site}-`)).map((n) => positions.get(n.id)!.x)
+      return (Math.min(...xs) + Math.max(...xs)) / 2
+    }
+    return { a: center('a'), b: center('b'), c: center('c') }
+  }
+
+  it('is not symmetric without the symmetry (the premise of the test)', () => {
+    const { a, b, c } = centers()
+    expect(Math.abs(b - a - (c - b))).toBeGreaterThan(10)
+  })
+
+  it('puts the pair of groups at the same distance on both sides of the axis group', () => {
+    const { a, b, c } = centers({ axis: 'b', mirror: [['a', 'c']] })
+    expect(b - a).toBeCloseTo(c - b, 6)
+  })
+
+  it('does not bring the groups closer than the gap (the nearer group moves outward), and ignores unknown groups', () => {
+    const plain = centers()
+    const mirrored = centers({ axis: 'b', mirror: [['a', 'c']] })
+    expect(mirrored.b - mirrored.a).toBeGreaterThanOrEqual(plain.b - plain.a - 1e-6)
+    expect(mirrored.c - mirrored.b).toBeGreaterThanOrEqual(plain.c - plain.b - 1e-6)
+    expect(centers({ axis: 'zzz', mirror: [['a', 'c']] })).toEqual(plain)
+    expect(centers({ axis: 'b', mirror: [['a', 'zzz']] })).toEqual(plain)
+  })
+})
+
+describe('solvePositions: align center', () => {
+  // group a: top row has 1 node (linked to the 3 nodes of the low row, which are pulled to the left by group b's links)
+  const profile = parseProfiles(`
+view: v
+tiers: [top, mid, low]
+name: '^(?<site>[a-z]+)-(?<role>[a-z]+)-(?<index>\\d+)$'
+rules:
+  - { select: '*', group: site }
+  - { select: '[role=top]', tier: top }
+  - { select: '[role=mid]', tier: mid }
+  - { select: '[role=low]', tier: low }
+  - { select: '[site=a]', order: 1 }
+  - { select: '[site=b]', order: 2 }
+`).profiles[0]!
+  const names = ['a-top-1', 'a-low-1', 'a-low-2', 'a-low-3', 'a-low-4', 'b-top-1']
+  const links: Array<[string, string]> = [
+    ['a-top-1', 'a-low-1'],
+    ['a-top-1', 'a-low-2'],
+    ['a-low-4', 'b-top-1'],
+  ]
+  const arrange = (align: boolean) => {
+    const nodes = names.map((n) => node(n))
+    const ls = links.map(([a, b]) => linkOf(a, b))
+    const slots = slotsOf(nodes, ls, profile)
+    const aligned = {
+      ...slots,
+      groups: slots.groups.map((g) => (align && g.key === 'a' ? { ...g, align: 'center' as const } : g)),
+    }
+    const positions = solvePositions(nodes, aligned, ls)
+    return (name: string) => positions.get(`l/${name}`)!
+  }
+
+  it('centers each row of the group on the axis of the group', () => {
+    const at = arrange(true)
+    const lows = ['a-low-1', 'a-low-2', 'a-low-3', 'a-low-4'].map((n) => at(n).x)
+    const axis = (Math.min(...lows) + Math.max(...lows)) / 2
+    expect(at('a-top-1').x).toBeCloseTo(axis, 6)
+  })
+
+  it('does not move the rows without align (the node follows its links)', () => {
+    const at = arrange(false)
+    const lows = ['a-low-1', 'a-low-2', 'a-low-3', 'a-low-4'].map((n) => at(n).x)
+    expect(at('a-top-1').x).not.toBeCloseTo((Math.min(...lows) + Math.max(...lows)) / 2, 1)
+  })
+
+  it('keeps the order and the minimum gaps in a row, and does not overlap the other group', () => {
+    const at = arrange(true)
+    const xs = ['a-low-1', 'a-low-2', 'a-low-3', 'a-low-4'].map((n) => at(n).x)
+    xs.slice(1).forEach((x, i) => expect(x - (xs[i] ?? 0)).toBeGreaterThanOrEqual(22 + 60 - 1e-6))
+    expect(at('b-top-1').x - at('a-top-1').x).toBeGreaterThanOrEqual(22 + 160 - 1e-6)
+  })
+})
 
 describe('solvePositions', () => {
   it('puts the nodes of a tier at the same height, the tiers from the top apart by the radius and the gap', () => {

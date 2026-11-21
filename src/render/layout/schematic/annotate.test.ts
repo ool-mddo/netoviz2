@@ -76,6 +76,42 @@ rules:
     expect(annotations.get('l/b1')).toMatchObject({ tier: 'y', tierIndex: 1, order: 5 })
   })
 
+  it('gives a literal group value (`group: { value }`) to nodes whose names have different captures', () => {
+    const profile = profileOf(`
+view: v
+tiers: [x]
+name: '^(?:(?<site>as\\d+)-)?(?<role>[a-z]+)(?:-(?<tk>tk))?(?<n>\\d+)$'
+rules:
+  - { select: '*', tier: x, group: site }
+  - { select: '[tk=tk]', group: { value: center } }
+  - { select: '[site=as2]', group: { value: center } }
+  - { select: '[site=as3]', group: { value: other } }
+  - { select: '[site=as3]', group: site }
+`)
+    const { annotations } = annotate(
+      [node('core-tk01'), node('as2-core00'), node('as1-core00'), node('as3-core00')],
+      profile,
+    )
+    expect(annotations.get('l/core-tk01')?.group).toBe('center') // no captured site
+    expect(annotations.get('l/as2-core00')?.group).toBe('center') // same value as the one above
+    expect(annotations.get('l/as1-core00')?.group).toBe('as1') // captured
+    expect(annotations.get('l/as3-core00')?.group).toBe('as3') // the later rule wins
+  })
+
+  it('gives `align` to the nodes selected (the later rule does not remove it)', () => {
+    const profile = profileOf(`
+view: v
+tiers: [x]
+name: '^(?<role>[a-z]+)\\d$'
+rules:
+  - { select: '*', tier: x }
+  - { select: '[role=a]', align: center }
+`)
+    const { annotations } = annotate([node('a1'), node('b1')], profile)
+    expect(annotations.get('l/a1')?.align).toBe('center')
+    expect(annotations.get('l/b1')?.align).toBeUndefined()
+  })
+
   it('selects by ID, name and kind, and reports the nodes without a tier', () => {
     const profile = profileOf(`
 view: v
